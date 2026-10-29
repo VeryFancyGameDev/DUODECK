@@ -44,7 +44,14 @@ object UserStore {
         val themes = o.optJSONArray("themes")?.let { a ->
             (0 until a.length()).mapNotNull { themeFromJson(a.getJSONObject(it)) }
         }.orEmpty()
+        val stats = o.optJSONObject("stats")?.let { j ->
+            j.keys().asSequence().associateWith {
+                val s = j.getJSONObject(it); GameStat(s.optInt("p"), s.optLong("l"))
+            }
+        }.orEmpty()
         return UserState(
+            coins = o.optInt("coins", 10), coinDay = o.optString("coinDay"), coinsToday = o.optInt("coinsToday"),
+            stats = stats, owned = strings(o.optJSONArray("owned")).toSet(),
             groups = groups, apps = apps,
             favorites = strings(o.optJSONArray("favorites")).toSet(),
             recents = strings(o.optJSONArray("recents")),
@@ -55,6 +62,11 @@ object UserStore {
     }
 
     private fun toJson(s: UserState): JSONObject = JSONObject().apply {
+        put("coins", s.coins); put("coinDay", s.coinDay); put("coinsToday", s.coinsToday)
+        put("owned", JSONArray(s.owned.toList()))
+        put("stats", JSONObject().apply {
+            s.stats.forEach { (k, v) -> put(k, JSONObject().put("p", v.plays).put("l", v.last)) }
+        })
         put("groups", JSONArray().apply {
             s.groups.forEach { g ->
                 put(JSONObject().put("id", g.id).put("name", g.name).put("color", g.colorIdx)

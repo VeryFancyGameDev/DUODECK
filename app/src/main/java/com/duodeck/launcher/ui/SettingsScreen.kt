@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.duodeck.launcher.data.SortMode
 import com.duodeck.launcher.LibraryViewModel
 import com.duodeck.launcher.Screen
 import com.duodeck.launcher.data.LibraryLayout
@@ -129,6 +130,12 @@ fun SettingsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                         Pill("+", false, { scope.launch { vm.prefs.setCols(s.gridColumns + 1) } })
                     }
                     Spacer(Modifier.height(8.dp))
+                    Text("Sort games", color = duo.text, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("A–Z", s.sort == SortMode.NAME, { scope.launch { vm.prefs.setSort(SortMode.NAME) } })
+                        Pill("Recent", s.sort == SortMode.RECENT, { scope.launch { vm.prefs.setSort(SortMode.RECENT) } })
+                        Pill("Most played", s.sort == SortMode.MOST_PLAYED, { scope.launch { vm.prefs.setSort(SortMode.MOST_PLAYED) } })
+                    }
                     ToggleRow("Show names under tiles", "", s.showLabels) { scope.launch { vm.prefs.setLabels(it) } }
                     ToggleRow("Tap once to launch", "Off: first tap selects and previews, second tap launches.", s.tapToLaunch) {
                         scope.launch { vm.prefs.setTapToLaunch(it) }

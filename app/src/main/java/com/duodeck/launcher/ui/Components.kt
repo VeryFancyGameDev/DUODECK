@@ -22,7 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -88,6 +90,24 @@ private fun DrawScope.drawPattern(duo: Duo) {
             var x = step
             while (x < size.width) { drawLine(duo.dots, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx()); x += step }
         }
+        "cubes" -> {
+            val cube = 84.dp.toPx()
+            val gapPx = 16.dp.toPx()
+            val step = cube + gapPx
+            val radius = 16.dp.toPx()
+            var y = -cube / 2f
+            var row = 0
+            while (y < size.height) {
+                var x = if (row % 2 == 0) -cube / 3f else step / 2f - cube / 3f
+                while (x < size.width) {
+                    drawRoundRect(duo.dots, Offset(x, y), Size(cube, cube), CornerRadius(radius))
+                    drawRoundRect(Color.Black.copy(alpha = 0.035f), Offset(x, y), Size(cube, cube), CornerRadius(radius),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx()))
+                    x += step
+                }
+                y += step * 0.86f; row++
+            }
+        }
         "bubbles" -> {
             val r = Random(7)
             repeat(24) {
@@ -138,30 +158,79 @@ fun Modifier.bounceClick(enabled: Boolean = true, onLongClick: (() -> Unit)? = n
         }
 }
 
+/** Gold Play Coin glyph (original artwork). */
 @Composable
-fun StatusStrip(modifier: Modifier = Modifier) {
+fun CoinIcon(modifier: Modifier = Modifier, size: Dp = 26.dp) {
+    Canvas(modifier.size(size)) {
+        val r = this.size.minDimension / 2f
+        val c = Offset(r, r)
+        drawCircle(Brush.verticalGradient(listOf(Color(0xFFFFE27A), Color(0xFFC99A12))), r, c)
+        drawCircle(Color(0xFFB8860B), r * 0.80f, c)
+        drawCircle(Brush.verticalGradient(listOf(Color(0xFFFFDF70), Color(0xFFE2AE22))), r * 0.72f, c)
+        val q = r * 0.34f
+        drawRoundRect(Color(0xFFB8860B), Offset(r - q, r - q), Size(q * 2, q * 2), CornerRadius(q * 0.4f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(r * 0.14f))
+        drawRoundRect(Color(0xFFB8860B), Offset(r - q * 0.35f, r - q * 0.35f), Size(q * 0.7f, q * 0.7f), CornerRadius(q * 0.15f))
+    }
+}
+
+/** Top bar of the top screen: connection, Play Coins, date/time and battery. */
+@Composable
+fun HomeStatusBar(coins: Int, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val duo = LocalDuo.current
     var now by remember { mutableStateOf(Date()) }
     var battery by remember { mutableIntStateOf(batteryPercent(ctx)) }
+    var online by remember { mutableStateOf(isOnline(ctx)) }
     LaunchedEffect(Unit) {
-        while (true) { now = Date(); battery = batteryPercent(ctx); delay(20_000) }
+        while (true) { now = Date(); battery = batteryPercent(ctx); online = isOnline(ctx); delay(15_000) }
     }
+    var pop by remember { mutableStateOf(false) }
+    LaunchedEffect(coins) { pop = true; delay(280); pop = false }
+    val coinScale by animateFloatAsState(if (pop) 1.4f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "coin")
+    val is24 = android.text.format.DateFormat.is24HourFormat(ctx)
+    val time = SimpleDateFormat(if (is24) "HH  mm" else "h  mm", Locale.getDefault()).format(now)
+    val date = SimpleDateFormat("M/d (EEE)", Locale.getDefault()).format(now)
+
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(SimpleDateFormat("h:mm a", Locale.getDefault()).format(now),
-            color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-        Text(SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(now),
-            color = duo.muted, fontWeight = FontWeight.Medium, fontSize = 12.sp)
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.size(width = 26.dp, height = 12.dp).clip(RoundedCornerShape(4.dp))
-            .border(1.5.dp, duo.muted, RoundedCornerShape(4.dp)).padding(2.dp)) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(battery / 100f)
-                .clip(RoundedCornerShape(2.dp))
-                .background(if (battery <= 20) Color(0xFFE5484D) else duo.accent))
+        // connection pill with signal bars
+        Row(Modifier.clip(RoundedCornerShape(8.dp)).background(duo.surface.copy(alpha = 0.7f))
+            .border(1.dp, duo.stroke, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.size(16.dp, 14.dp)) {
+                val w = this.size.width / 5f
+                for (i in 0..2) {
+                    val h = this.size.height * (0.4f + 0.3f * i)
+                    drawRoundRect(if (online) duo.accent else duo.muted.copy(alpha = 0.5f),
+                        Offset(i * w * 1.7f, this.size.height - h), Size(w, h), CornerRadius(1.5f))
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(if (online) "Online" else "Offline", color = duo.muted, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
-        Text("$battery%", color = duo.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        CoinIcon(Modifier.scale(coinScale), 24.dp)
+        Text("$coins", color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, modifier = Modifier.offset(x = (-6).dp))
+        Spacer(Modifier.weight(1f))
+        Text(date, color = duo.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(time, color = duo.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        // battery with the tip on the left
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(3.dp, 10.dp).clip(RoundedCornerShape(1.dp)).background(duo.text.copy(alpha = 0.7f)))
+            Box(Modifier.size(34.dp, 18.dp).clip(RoundedCornerShape(5.dp))
+                .border(2.dp, duo.text.copy(alpha = 0.75f), RoundedCornerShape(5.dp)).padding(2.dp)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(battery / 100f).clip(RoundedCornerShape(3.dp))
+                    .background(Brush.verticalGradient(
+                        if (battery <= 20) listOf(Color(0xFFFF8A80), Color(0xFFE5484D))
+                        else listOf(Color(0xFFFFB74D), Color(0xFFF57C00)))))
+            }
+        }
     }
 }
+
+private fun isOnline(ctx: Context): Boolean = runCatching {
+    val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+    cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+}.getOrDefault(false)
 
 private fun batteryPercent(ctx: Context): Int {
     val i = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return 100

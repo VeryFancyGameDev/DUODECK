@@ -25,6 +25,8 @@ data class ThemeDef(
     val light: Pal,
     val dark: Pal,
     val builtin: Boolean = false,
+    /** Play Coins price in the Theme Store (0 = free). */
+    val cost: Int = 0,
 )
 
 private fun hex(i: Int) = String.format("#%08X", i)
@@ -46,7 +48,7 @@ private fun palFrom(o: JSONObject?, f: Pal): Pal = if (o == null) f else Pal(
 
 fun ThemeDef.toJson(): JSONObject = JSONObject()
     .put("id", id).put("name", name).put("author", author).put("blurb", blurb).put("pattern", pattern)
-    .put("light", light.toJson()).put("dark", dark.toJson())
+    .put("cost", cost).put("light", light.toJson()).put("dark", dark.toJson())
 
 fun themeFromJson(o: JSONObject): ThemeDef? {
     val id = o.optString("id").trim()
@@ -60,6 +62,7 @@ fun themeFromJson(o: JSONObject): ThemeDef? {
         pattern = o.optString("pattern", "dots"),
         light = palFrom(o.optJSONObject("light"), base.light),
         dark = palFrom(o.optJSONObject("dark"), base.dark),
+        cost = o.optInt("cost", 0),
     )
 }
 
@@ -74,6 +77,10 @@ object Themes {
     const val STORE_URL = "https://raw.githubusercontent.com/VeryFancyGameDev/duodeck/main/themes/index.json"
 
     val builtin: List<ThemeDef> = listOf(
+        ThemeDef("home", "Home Menu", "DuoDeck", "Soft cubes, a cream panel and a mint selection frame.", "cubes",
+            light = P(0xFFF2F2F7, 0xFFD9D9E7, 0xB3FFFFFF, 0xFFFFFFFF, 0xFFE6E3DE, 0xFF3A3A46, 0xFF8A8A9B, 0xFF1FC9A0, 0xFF6DEBC6, 0x26000000),
+            dark = P(0xFF2B2E3C, 0xFF171923, 0x16FFFFFF, 0xFF3A3F52, 0xFF2D3040, 0xFFF2F3FA, 0xFF9EA3BA, 0xFF2EE6B0, 0xFF86F5D4, 0x33FFFFFF),
+            builtin = true),
         ThemeDef("sky", "Sky", "DuoDeck", "Bright 3DS-style blue with halftone dots.", "dots",
             light = P(0xFFF7FBFF, 0xFFDCEBF7, 0x1A3D8EC9, 0xFFFFFFFF, 0xFFEAF3FB, 0xFF26324A, 0xFF6F809E, 0xFF1FA8E0, 0xFF6FD6FF, 0x1F26324A),
             dark = P(0xFF1B2540, 0xFF0E1426, 0x14FFFFFF, 0xFF243055, 0xFF2E3C6B, 0xFFF1F5FF, 0xFF9FB0D8, 0xFF1FA8E0, 0xFF6FD6FF, 0x33FFFFFF),

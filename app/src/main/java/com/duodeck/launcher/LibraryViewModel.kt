@@ -3,6 +3,7 @@ package com.duodeck.launcher
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.duodeck.launcher.data.*
@@ -101,6 +102,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         val q = i.q.trim()
         fun ok(t: String) = q.isEmpty() || t.contains(q, ignoreCase = true)
         val byId = i.games.associateBy { it.id }
+        fun sorted(list: List<Game>): List<Game> = when (s.sort) {
+            SortMode.NAME -> list
+            SortMode.RECENT -> list.sortedByDescending { i.user.stats[it.id]?.last ?: 0L }
+            SortMode.MOST_PLAYED -> list.sortedByDescending { i.user.stats[it.id]?.plays ?: 0 }
+        }
         fun gameTiles(list: List<Game>): List<Tile> =
             list.filter { ok(it.title) && (!s.hideNoArt || i.art.containsKey(it.id)) }.map { GameTile(it) }
         val t = i.tab
@@ -109,12 +115,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             t == "apps" -> i.user.apps.filter { ok(it.label) }.map { AppTile(it) } + AddTile("app")
             t == "fav" -> gameTiles(i.user.favorites.mapNotNull { byId[it] }.sortedBy { it.title.lowercase() })
             t == "recent" -> gameTiles(i.user.recents.mapNotNull { byId[it] })
-            t.startsWith("sys:") -> gameTiles(i.games.filter { it.systemId == t.removePrefix("sys:") })
+            t.startsWith("sys:") -> gameTiles(sorted(i.games.filter { it.systemId == t.removePrefix("sys:") }))
             t.startsWith("group:") -> {
                 val g = i.user.groups.firstOrNull { it.id == t.removePrefix("group:") }
                 gameTiles(g?.gameIds.orEmpty().mapNotNull { byId[it] })
             }
-            else -> i.user.groups.filter { q.isEmpty() }.map { GroupTile(it) } + gameTiles(i.games)
+            else -> i.user.groups.filter { q.isEmpty() }.map { GroupTile(it) } + gameTiles(sorted(i.games))
         }
     }
 
@@ -152,9 +158,46 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+    /**
+     * Launches a game and awards Play Coins: 1 per launch (up to 10 a day), +3 the first time you
+     * ever play a particular game. The wallet holds 300 at most, like the handheld it's inspired by.
+     */
     fun launchGame(game: Game, chooser: Boolean = false) {
-        updateUser { it.copy(recents = (listOf(game.id) + it.recents.filter { x -> x != game.id }).take(24)) }
+        var gain = 0
+        updateUser { u ->
+            val day = today()
+            val doneToday = if (u.coinDay == day) u.coinsToday else 0
+            var g = 0
+            if (doneToday < 10) g += 1
+            if (u.stats[game.id] == null) g += 3
+            val total = (u.coins + g).coerceAtMost(300)
+            gain = total - u.coins
+            val st = u.stats[game.id] ?: GameStat()
+            u.copy(
+                recents = (listOf(game.id) + u.recents.filter { x -> x != game.id }).take(24),
+                coins = total, coinDay = day,
+                coinsToday = if (doneToday < 10) doneToday + 1 else doneToday,
+                stats = u.stats + (game.id to GameStat(st.plays + 1, System.currentTimeMillis())),
+            )
+        }
+        if (gain > 0) Toast.makeText(ctx, "+$gain Play Coin${if (gain == 1) "" else "s"}!", Toast.LENGTH_SHORT).show()
         Launcher.launchGame(ctx, game, _user.value, chooser)
+    }
+
+    fun randomGame() {
+        val g = tiles.value.filterIsInstance<GameTile>().randomOrNull() ?: return
+        selectedKey.value = g.key
+    }
+
+    /** Spends Play Coins on a store theme. Returns false if you can't afford it. */
+    fun buyTheme(t: ThemeDef): Boolean {
+        if (t.cost > _user.value.coins) return false
+        updateUser { it.copy(coins = it.coins - t.cost, owned = it.owned + t.id) }
+        installTheme(t)
+        applyTheme(t.id)
+        return true
     }
 
     // ------------------------------------------------------------ ROM folders
@@ -307,7 +350,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun installTheme(t: ThemeDef) = updateUser { u -> u.copy(themes = u.themes.filter { it.id != t.id } + t.copy(builtin = false)) }
 
     fun removeTheme(id: String) {
-        if (settings.value.themeId == id) viewModelScope.launch { prefs.setThemeId("sky") }
+        if (settings.value.themeId == id) viewModelScope.launch { prefs.setThemeId("home") }
         updateUser { u -> u.copy(themes = u.themes.filter { it.id != id }) }
     }
 

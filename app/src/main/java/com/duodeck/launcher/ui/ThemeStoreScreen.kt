@@ -34,6 +34,7 @@ fun ThemeStoreScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
     val status by vm.storeStatus.collectAsStateWithLifecycle()
     val mine by vm.allThemes.collectAsStateWithLifecycle()
     val s by vm.settings.collectAsStateWithLifecycle()
+    val user by vm.user.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) { vm.fetchStore() }
@@ -50,6 +51,10 @@ fun ThemeStoreScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
     DotBackground(modifier) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             ScreenHeader("Theme Store", vm)
+            Row(Modifier.padding(horizontal = 18.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CoinIcon(Modifier, 22.dp)
+                Text("${user.coins} Play Coins", color = duo.text, fontWeight = FontWeight.ExtraBold)
+            }
             Row(Modifier.padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Store", tab == 0, { tab = 0 })
                 Pill("My themes", tab == 1, { tab = 1 })
@@ -77,7 +82,11 @@ fun ThemeStoreScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                     val active = s.themeId == t.id
                     ThemeCard(
                         t, active, installed,
-                        onGet = { vm.installTheme(t); vm.applyTheme(t.id) },
+                        cost = if (t.id in user.owned) 0 else t.cost,
+                        onGet = {
+                            if (t.id in user.owned || t.cost == 0) { vm.installTheme(t); vm.applyTheme(t.id) }
+                            else if (!vm.buyTheme(t)) Toast.makeText(ctx, "Not enough Play Coins. Play games to earn more!", Toast.LENGTH_SHORT).show()
+                        },
                         onApply = { vm.applyTheme(t.id) },
                         onRemove = if (installed && mine.firstOrNull { it.id == t.id }?.builtin == false) ({ vm.removeTheme(t.id) }) else null,
                         onShare = {
@@ -96,7 +105,7 @@ fun ThemeStoreScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ThemeCard(
-    t: ThemeDef, active: Boolean, installed: Boolean,
+    t: ThemeDef, active: Boolean, installed: Boolean, cost: Int,
     onGet: () -> Unit, onApply: () -> Unit, onRemove: (() -> Unit)?, onShare: () -> Unit,
 ) {
     val duo = LocalDuo.current
@@ -119,7 +128,7 @@ private fun ThemeCard(
             when {
                 active -> Pill("Applied", false, {})
                 installed -> Pill("Apply", true, onApply)
-                else -> Pill("Get", true, onGet)
+                else -> Pill(if (cost > 0) "Buy  $cost coins" else "Get", true, onGet)
             }
             Pill("Share", false, onShare)
             if (onRemove != null) Pill("Remove", false, onRemove)

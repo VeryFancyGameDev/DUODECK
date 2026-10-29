@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,8 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,7 +43,7 @@ import com.duodeck.launcher.*
 import com.duodeck.launcher.data.LibraryLayout
 import kotlinx.coroutines.launch
 
-/** The "touch screen": tabs, the tile browser (pages / grid / carousel) and the bubble action bar. */
+/** The "touch screen": a dock of shortcuts above a cream panel of square tile cards. */
 @Composable
 fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modifier = Modifier) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -54,6 +59,7 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
     val progress by vm.progress.collectAsStateWithLifecycle()
     val games by vm.games.collectAsStateWithLifecycle()
     var searching by remember { mutableStateOf(false) }
+    var showSystems by remember { mutableStateOf(false) }
 
     val byId = remember(games) { games.associateBy { it.id } }
     val env = TileEnv(art, progress, user.favorites, byId, settings.showLabels)
@@ -65,34 +71,47 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
 
     val gameTab = tab == "all" || tab == "fav" || tab == "recent" || tab.startsWith("sys:") || tab.startsWith("group:")
     val needsRoms = games.isEmpty() && settings.romsUris.isEmpty() && gameTab
+    val inGroup = tab.startsWith("group:")
 
     DotBackground(modifier) {
-        Column(Modifier.fillMaxSize().systemBarsPadding().padding(top = 10.dp)) {
-            // ---- tabs ----
-            LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (tab.startsWith("group:")) {
-                    val g = user.groups.firstOrNull { "group:${it.id}" == tab }
-                    item { Pill("‹ Groups", false, { vm.tab.value = "groups" }) }
-                    item { Pill(g?.name ?: "Group", true, {}, tint = GroupColors[(g?.colorIdx ?: 0).coerceIn(0, GroupColors.lastIndex)].first) }
-                } else {
+        Column(Modifier.fillMaxSize().systemBarsPadding()) {
+            Dock(
+                tab = tab, layout = settings.layout, user = user,
+                onTab = { t ->
+                    if (t == "all" && (tab == "all" || tab.startsWith("sys:"))) showSystems = !showSystems
+                    vm.tab.value = t
+                },
+                onSettings = { vm.go(Screen.SETTINGS) },
+                onLayout = { vm.cycleLayout() },
+                onAvatar = { vm.go(Screen.AVATAR) },
+            )
+
+            if (inGroup) {
+                val g = user.groups.firstOrNull { "group:${it.id}" == tab }
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("‹ Groups", false, { vm.tab.value = "groups" })
+                    Pill(g?.name ?: "Group", true, {}, tint = GroupColors[(g?.colorIdx ?: 0).coerceIn(0, GroupColors.lastIndex)].first)
+                }
+            } else if (showSystems || tab.startsWith("sys:")) {
+                LazyRow(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item { Pill("All", tab == "all", { vm.tab.value = "all" }) }
-                    item { Pill("★", tab == "fav", { vm.tab.value = "fav" }) }
-                    item { Pill("Recent", tab == "recent", { vm.tab.value = "recent" }) }
-                    item { Pill("Groups", tab == "groups", { vm.tab.value = "groups" }) }
-                    item { Pill("Apps", tab == "apps", { vm.tab.value = "apps" }) }
                     items(systems.size) { i ->
                         val s = systems[i]
                         Pill(s.short, tab == "sys:${s.id}", { vm.tab.value = "sys:${s.id}" }, tint = s.colorA)
                     }
                 }
-            }
+            } else Spacer(Modifier.height(6.dp))
+
             if (searching) {
-                Spacer(Modifier.height(8.dp))
-                SearchField(query, { vm.query.value = it }, Modifier.padding(horizontal = 14.dp))
+                SearchField(query, { vm.query.value = it }, Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp))
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
+            // ---- the cream panel ----
+            val panelShape = RoundedCornerShape(26.dp)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)
+                .clip(panelShape).background(LocalDuo.current.surfaceHigh)
+                .border(1.dp, LocalDuo.current.stroke, panelShape)) {
                 when {
                     needsRoms -> Onboarding(onPickFolder)
                     tiles.isEmpty() && scanning -> Centered("Scanning your library…\n$scanCount games found so far")
@@ -103,27 +122,77 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
                         GridView(tiles, selected, env, settings.gridColumns, onTile, onLong)
                     else -> CarouselView(vm, tiles, selected, env, onTile, onLong)
                 }
+                Box(Modifier.fillMaxWidth().height(10.dp).align(Alignment.TopCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.07f), Color.Transparent))))
             }
 
-            // ---- action bar ----
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            // ---- small action bar ----
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                GlossyIcon(
-                    when (settings.layout) {
-                        LibraryLayout.PAGES -> Icons.Filled.ViewModule
-                        LibraryLayout.GRID -> Icons.Filled.GridView
-                        LibraryLayout.CAROUSEL -> Icons.Filled.ViewCarousel
-                    }, "Switch layout", { vm.cycleLayout() })
                 GlossyIcon(Icons.Filled.Search, "Search", {
                     searching = !searching; if (!searching) vm.query.value = ""
-                }, active = searching)
+                }, active = searching, size = 40.dp)
                 GlossyIcon(if (tab == "apps") Icons.Filled.Add else Icons.Filled.CreateNewFolder, "Add", {
                     vm.show(if (tab == "apps") Dlg.AddApp else Dlg.NewGroup())
-                })
-                GlossyIcon(Icons.Filled.Refresh, "Rescan library", { vm.rescan() }, active = scanning)
-                GlossyIcon(Icons.Filled.Settings, "Settings", { vm.go(Screen.SETTINGS) }, size = 54.dp, active = true)
+                }, size = 40.dp)
+                GlossyIcon(Icons.Filled.Casino, "Random game", { vm.randomGame() }, size = 40.dp)
+                GlossyIcon(Icons.Filled.Refresh, "Rescan library", { vm.rescan() }, active = scanning, size = 40.dp)
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------- dock
+
+@Composable
+private fun Dock(
+    tab: String, layout: LibraryLayout, user: com.duodeck.launcher.data.UserState,
+    onTab: (String) -> Unit, onSettings: () -> Unit, onLayout: () -> Unit, onAvatar: () -> Unit,
+) {
+    val duo = LocalDuo.current
+    Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
+        // settings tab on the left edge
+        Box(Modifier.width(58.dp).fillMaxHeight()
+            .clip(RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp))
+            .background(duo.surface.copy(alpha = 0.92f)).bounceClick(onClick = onSettings),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Settings, "Settings", tint = duo.accent, modifier = Modifier.size(30.dp))
+        }
+        val items = listOf(
+            Triple("all", Icons.Filled.SportsEsports, Color(0xFFFF8F00)),
+            Triple("fav", Icons.Filled.Star, Color(0xFFFFB300)),
+            Triple("recent", Icons.Filled.History, Color(0xFF00BFA5)),
+            Triple("groups", Icons.Filled.Folder, Color(0xFF43C32F)),
+            Triple("apps", Icons.Filled.Apps, Color(0xFF2979FF)),
+        )
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            items.forEach { (key, icon, tint) ->
+                val on = tab == key || (key == "all" && tab.startsWith("sys:")) || (key == "groups" && tab.startsWith("group:"))
+                DockIcon(icon, tint, on) { onTab(key) }
+            }
+        }
+        // layout + avatar capsule
+        Row(Modifier.padding(end = 8.dp).clip(RoundedCornerShape(18.dp)).background(duo.surface.copy(alpha = 0.92f))
+            .padding(horizontal = 6.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(when (layout) {
+                LibraryLayout.PAGES -> Icons.Filled.ViewModule
+                LibraryLayout.GRID -> Icons.Filled.GridView
+                LibraryLayout.CAROUSEL -> Icons.Filled.ViewCarousel
+            }, "Layout", tint = Color(0xFF5C7CFA),
+                modifier = Modifier.size(34.dp).bounceClick(onClick = onLayout).padding(3.dp))
+            AvatarView(user.avatar, Modifier.size(34.dp).clip(CircleShape).bounceClick(onClick = onAvatar))
+        }
+    }
+}
+
+@Composable
+private fun DockIcon(icon: ImageVector, tint: Color, on: Boolean, onClick: () -> Unit) {
+    val duo = LocalDuo.current
+    val lift by animateFloatAsState(if (on) 1.12f else 1f, label = "dock")
+    Box(Modifier.size(44.dp).scale(lift).bounceClick(onClick = onClick).clip(RoundedCornerShape(14.dp))
+        .background(if (on) duo.surface else Color.Transparent), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(30.dp))
     }
 }
 
@@ -144,15 +213,15 @@ private fun PagesView(
 ) {
     val duo = LocalDuo.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val gap = 12.dp
-        val pad = 14.dp
+        val gap = 16.dp
+        val pad = 20.dp
         val tileW: Dp = (maxWidth - pad * 2 - gap * (columns - 1)) / columns
         val labelH = if (env.showLabel) 22.dp else 0.dp
-        val dotsH = 22.dp
-        val rows = (((maxHeight - dotsH) + gap) / (tileW + labelH + gap)).toInt().coerceAtLeast(1)
+        val dotsH = 24.dp
+        val rows = (((maxHeight - dotsH - 12.dp) + gap) / (tileW + labelH + gap)).toInt().coerceAtLeast(1)
         val per = rows * columns
         val pages = remember(tiles, per) { tiles.chunked(per) }
-        val pager = rememberPagerState(pageCount = { pages.size })
+        val pager: PagerState = rememberPagerState(pageCount = { pages.size })
         val scope = rememberCoroutineScope()
 
         LaunchedEffect(selected?.key, per) {
@@ -160,19 +229,31 @@ private fun PagesView(
             if (idx >= 0 && pager.currentPage != idx / per) pager.animateScrollToPage(idx / per)
         }
 
-        Column(Modifier.fillMaxSize()) {
-            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { page ->
-                Column(Modifier.fillMaxSize().padding(horizontal = pad), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    for (r in 0 until rows) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            for (c in 0 until columns) {
-                                val t = pages[page].getOrNull(r * columns + c)
-                                if (t != null) {
-                                    TileView(t, t.key == selected?.key, env, Modifier.weight(1f),
-                                        onClick = { onTile(t) }, onLongClick = { onLong(t) })
-                                } else Spacer(Modifier.weight(1f))
+        Column(Modifier.fillMaxSize().padding(top = 12.dp)) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                    Column(Modifier.fillMaxSize().padding(horizontal = pad), verticalArrangement = Arrangement.spacedBy(gap)) {
+                        for (r in 0 until rows) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                for (c in 0 until columns) {
+                                    val t = pages[page].getOrNull(r * columns + c)
+                                    if (t != null) {
+                                        TileView(t, t.key == selected?.key, env, Modifier.weight(1f),
+                                            onClick = { onTile(t) }, onLongClick = { onLong(t) })
+                                    } else Spacer(Modifier.weight(1f))
+                                }
                             }
                         }
+                    }
+                }
+                if (pager.currentPage < pages.size - 1) {
+                    PageArrow(Icons.Filled.ArrowForward, Modifier.align(Alignment.CenterEnd).offset(x = 16.dp)) {
+                        scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                    }
+                }
+                if (pager.currentPage > 0) {
+                    PageArrow(Icons.Filled.ArrowBack, Modifier.align(Alignment.CenterStart).offset(x = (-16).dp)) {
+                        scope.launch { pager.animateScrollToPage(pager.currentPage - 1) }
                     }
                 }
             }
@@ -186,8 +267,17 @@ private fun PagesView(
                             .bounceClick { scope.launch { pager.animateScrollToPage(i) } })
                     }
                 }
-            }
+            } else Spacer(Modifier.height(dotsH))
         }
+    }
+}
+
+@Composable
+private fun PageArrow(icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    val duo = LocalDuo.current
+    Box(modifier.size(54.dp).shadow(4.dp, CircleShape).clip(CircleShape).background(duo.surface)
+        .bounceClick(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = duo.accent, modifier = Modifier.size(26.dp))
     }
 }
 
@@ -202,8 +292,8 @@ private fun GridView(
         if (idx >= 0 && state.layoutInfo.visibleItemsInfo.none { it.index == idx }) state.animateScrollToItem(idx)
     }
     LazyVerticalGrid(GridCells.Fixed(columns), Modifier.fillMaxSize(), state = state,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         items(tiles.size, key = { tiles[it].key }) { i ->
             val t = tiles[i]
             TileView(t, t.key == selected?.key, env, onClick = { onTile(t) }, onLongClick = { onLong(t) })
@@ -221,11 +311,9 @@ private fun CarouselView(
     val fling = rememberSnapFlingBehavior(state)
     val center by remember { derivedStateOf { state.firstVisibleItemIndex } }
 
-    // Adopt the centred tile once scrolling settles.
     LaunchedEffect(center, state.isScrollInProgress, tiles) {
         if (!state.isScrollInProgress) tiles.getOrNull(center)?.let { vm.select(it) }
     }
-    // A d-pad / gamepad move changes the selection: scroll the carousel to it.
     LaunchedEffect(selected?.key) {
         val idx = tiles.indexOfFirst { it.key == selected?.key }
         if (idx >= 0 && idx != state.firstVisibleItemIndex && !state.isScrollInProgress) state.animateScrollToItem(idx)
@@ -237,13 +325,13 @@ private fun CarouselView(
         val scope = rememberCoroutineScope()
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
             LazyRow(state = state, flingBehavior = fling, contentPadding = PaddingValues(horizontal = side),
-                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().weight(1f)) {
                 itemsIndexed(tiles, key = { _, t -> t.key }) { i, t ->
                     val isCenter = i == center
                     val s by animateFloatAsState(if (isCenter) 1f else 0.78f, label = "carousel")
-                    Box(Modifier.width(itemW).scale(s)) {
-                        TileView(t, false, env.copy(showLabel = false), Modifier.fillMaxWidth(),
+                    Box(Modifier.width(itemW).padding(8.dp).scale(s)) {
+                        TileView(t, isCenter, env.copy(showLabel = false), Modifier.fillMaxWidth(),
                             onClick = { if (isCenter) onTile(t) else scope.launch { state.animateScrollToItem(i) } },
                             onLongClick = { onLong(t) })
                     }
@@ -254,7 +342,7 @@ private fun CarouselView(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp))
             Text("${center + 1} / ${tiles.size}", color = duo.muted, fontSize = 12.sp,
-                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
         }
     }
 }

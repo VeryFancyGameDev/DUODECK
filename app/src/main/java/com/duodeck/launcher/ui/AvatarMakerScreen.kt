@@ -37,7 +37,7 @@ fun AvatarMakerScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
             ScreenHeader("Avatar Maker", vm)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    AvatarView(a, Modifier.size(150.dp).clip(RoundedCornerShape(28.dp))
+                    Avatar3D(a, Modifier.size(150.dp).clip(RoundedCornerShape(28.dp))
                         .border(2.dp, duo.stroke, RoundedCornerShape(28.dp)))
                     Column(Modifier.weight(1f)) {
                         Text("Name", color = duo.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)

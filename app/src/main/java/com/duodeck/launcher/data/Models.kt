@@ -76,8 +76,17 @@ data class Avatar(
     val bg: Int = 0,
 )
 
+data class GameStat(val plays: Int = 0, val last: Long = 0L)
+
+enum class SortMode { NAME, RECENT, MOST_PLAYED }
+
 /** Everything the user creates inside the app (saved to user.json). */
 data class UserState(
+    val coins: Int = 10,
+    val coinDay: String = "",
+    val coinsToday: Int = 0,
+    val stats: Map<String, GameStat> = emptyMap(),
+    val owned: Set<String> = emptySet(),
     val groups: List<Group> = emptyList(),
     val apps: List<AppEntry> = emptyList(),
     val favorites: Set<String> = emptySet(),

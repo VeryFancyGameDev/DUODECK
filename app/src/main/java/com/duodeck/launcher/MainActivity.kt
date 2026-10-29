@@ -151,6 +151,10 @@ class MainActivity : ComponentActivity() {
             }
             KeyEvent.KEYCODE_BUTTON_X -> { tiles.getOrNull(cur)?.let { vm.longPress(it) }; true }
             KeyEvent.KEYCODE_BUTTON_Y -> { vm.cycleLayout(); true }
+            KeyEvent.KEYCODE_BUTTON_SELECT -> {
+                (tiles.getOrNull(cur) as? GameTile)?.let { vm.show(Dlg.EmuProfile("game:${it.game.id}", it.game.systemId, it.game.title)) }
+                true
+            }
             KeyEvent.KEYCODE_BUTTON_START -> { vm.go(Screen.SETTINGS); true }
             KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1 -> {
                 val order = listOf("all", "fav", "recent", "groups", "apps") + vm.systemsPresent.value.map { "sys:${it.id}" }

@@ -29,7 +29,8 @@
         "accent": "#12D0DC",
         "accent2": "#7CEBF2",
         "stroke": "#33FFFFFF"
-      }
+      },
+      "cost": 5
     },
     {
       "id": "candy",
@@ -60,7 +61,8 @@
         "accent": "#FF6BD6",
         "accent2": "#FFA8EA",
         "stroke": "#33FFFFFF"
-      }
+      },
+      "cost": 10
     },
     {
       "id": "forest",
@@ -91,7 +93,8 @@
         "accent": "#6CC04A",
         "accent2": "#A6E08A",
         "stroke": "#33FFFFFF"
-      }
+      },
+      "cost": 15
     },
     {
       "id": "express",
@@ -122,7 +125,8 @@
         "accent": "#5B7BFF",
         "accent2": "#A5B6FF",
         "stroke": "#445B7BFF"
-      }
+      },
+      "cost": 25
     }
   ]
 }

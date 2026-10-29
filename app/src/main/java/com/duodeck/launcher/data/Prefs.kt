@@ -16,15 +16,15 @@ private val Context.store by preferencesDataStore("duodeck_settings")
 data class Settings(
     val romsUris: List<String> = emptyList(),
     val theme: ThemeMode = ThemeMode.SYSTEM,
-    val themeId: String = "sky",
+    val themeId: String = "home",
     val layout: LibraryLayout = LibraryLayout.PAGES,
-    val gridColumns: Int = 4,
+    val gridColumns: Int = 3,
     val raUser: String = "",
     val raKey: String = "",
     val sgdbKey: String = "",
     val dualScreen: Boolean = true,
     val hideNoArt: Boolean = false,
-    val showLabels: Boolean = true,
+    val showLabels: Boolean = false,
     val tapToLaunch: Boolean = false,
     val musicMode: MusicMode = MusicMode.BUILTIN,
     val musicTrack: Int = 0,
@@ -32,6 +32,7 @@ data class Settings(
     val musicUri: String? = null,
     val wallpaper: String? = null,
     val wallpaperDim: Float = 0.35f,
+    val sort: SortMode = SortMode.NAME,
 )
 
 class Prefs(private val ctx: Context) {
@@ -54,6 +55,7 @@ class Prefs(private val ctx: Context) {
         val musicUri = stringPreferencesKey("music_uri")
         val wallpaper = stringPreferencesKey("wallpaper")
         val wallDim = floatPreferencesKey("wall_dim")
+        val sort = stringPreferencesKey("sort")
     }
 
     val flow: Flow<Settings> = ctx.store.data.map { it.toSettings() }
@@ -61,15 +63,15 @@ class Prefs(private val ctx: Context) {
     private fun Preferences.toSettings() = Settings(
         romsUris = (this[K.roms] ?: "").split('\n').filter { it.isNotBlank() },
         theme = runCatching { ThemeMode.valueOf(this[K.theme] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
-        themeId = this[K.themeId] ?: "sky",
+        themeId = this[K.themeId] ?: "home",
         layout = runCatching { LibraryLayout.valueOf(this[K.layout] ?: "PAGES") }.getOrDefault(LibraryLayout.PAGES),
-        gridColumns = this[K.cols] ?: 4,
+        gridColumns = this[K.cols] ?: 3,
         raUser = this[K.raUser] ?: "",
         raKey = this[K.raKey] ?: "",
         sgdbKey = this[K.sgdb] ?: "",
         dualScreen = this[K.dual] ?: true,
         hideNoArt = this[K.hideNoArt] ?: false,
-        showLabels = this[K.labels] ?: true,
+        showLabels = this[K.labels] ?: false,
         tapToLaunch = this[K.tapLaunch] ?: false,
         musicMode = runCatching { MusicMode.valueOf(this[K.musicMode] ?: "BUILTIN") }.getOrDefault(MusicMode.BUILTIN),
         musicTrack = this[K.musicTrack] ?: 0,
@@ -77,6 +79,7 @@ class Prefs(private val ctx: Context) {
         musicUri = this[K.musicUri],
         wallpaper = this[K.wallpaper],
         wallpaperDim = this[K.wallDim] ?: 0.35f,
+        sort = runCatching { SortMode.valueOf(this[K.sort] ?: "NAME") }.getOrDefault(SortMode.NAME),
     )
 
     suspend fun setRoms(list: List<String>) = ctx.store.edit { it[K.roms] = list.joinToString("\n") }
@@ -96,4 +99,5 @@ class Prefs(private val ctx: Context) {
     suspend fun setMusicUri(v: String?) = ctx.store.edit { if (v == null) it.remove(K.musicUri) else it[K.musicUri] = v }
     suspend fun setWallpaper(v: String?) = ctx.store.edit { if (v == null) it.remove(K.wallpaper) else it[K.wallpaper] = v }
     suspend fun setWallpaperDim(v: Float) = ctx.store.edit { it[K.wallDim] = v.coerceIn(0f, 0.9f) }
+    suspend fun setSort(v: SortMode) = ctx.store.edit { it[K.sort] = v.name }
 }
