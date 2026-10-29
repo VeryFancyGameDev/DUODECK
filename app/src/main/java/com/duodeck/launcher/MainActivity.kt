@@ -17,14 +17,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.duodeck.launcher.data.Launcher
 import com.duodeck.launcher.data.LibraryLayout
+import com.duodeck.launcher.data.MusicManager
 import com.duodeck.launcher.ui.*
 import kotlinx.coroutines.launch
 
@@ -32,6 +31,7 @@ class MainActivity : ComponentActivity() {
     private val vm: LibraryViewModel by viewModels()
     private var presentation: SecondScreen? = null
     private var hasSecondDisplay by mutableStateOf(false)
+    private lateinit var music: MusicManager
 
     private val displays by lazy { getSystemService(Context.DISPLAY_SERVICE) as DisplayManager }
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -43,25 +43,36 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        music = MusicManager(applicationContext)
 
         setContent {
             val s by vm.settings.collectAsStateWithLifecycle()
+            val theme by vm.activeTheme.collectAsStateWithLifecycle()
+            val screen by vm.screen.collectAsStateWithLifecycle()
+            val tab by vm.tab.collectAsStateWithLifecycle()
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-                if (uri != null) vm.pickRomFolder(uri)
+                if (uri != null) vm.addRomFolder(uri)
             }
-            val settingsOpen by vm.showSettings.collectAsStateWithLifecycle()
-            BackHandler(enabled = settingsOpen) { vm.showSettings.value = false }
 
-            DuoTheme(s.theme, s.accent) {
-                val onPick = { picker.launch(null) }
+            BackHandler(enabled = screen != Screen.HOME || tab.startsWith("group:")) {
+                if (screen != Screen.HOME) vm.back() else vm.tab.value = "groups"
+            }
+
+            DuoTheme(s.theme, theme, s.wallpaper, s.wallpaperDim) {
                 val external = hasSecondDisplay && s.dualScreen
 
                 @Composable
                 fun Bottom(m: Modifier) {
-                    if (settingsOpen) SettingsScreen(vm, onPick, m) else BottomScreen(vm, onPick, m)
+                    when (screen) {
+                        Screen.HOME -> BottomScreen(vm, { picker.launch(null) }, m)
+                        Screen.SETTINGS -> SettingsScreen(vm, m)
+                        Screen.THEMES -> ThemeStoreScreen(vm, m)
+                        Screen.AVATAR -> AvatarMakerScreen(vm, m)
+                        Screen.EMULATORS -> EmulatorsScreen(vm, m)
+                    }
                 }
 
-                if (external) {
+                if (external || screen != Screen.HOME) {
                     Bottom(Modifier.fillMaxSize())
                 } else {
                     // One physical screen: stack the two "screens" (or put them side by side in landscape).
@@ -73,22 +84,27 @@ class MainActivity : ComponentActivity() {
                             }
                         } else {
                             Column(Modifier.fillMaxSize()) {
-                                TopScreen(vm, Modifier.weight(0.42f).fillMaxWidth())
-                                Bottom(Modifier.weight(0.58f).fillMaxWidth())
+                                TopScreen(vm, Modifier.weight(0.40f).fillMaxWidth())
+                                Bottom(Modifier.weight(0.60f).fillMaxWidth())
                             }
                         }
                     }
                 }
+                DialogHost(vm)
             }
         }
 
         displays.registerDisplayListener(displayListener, null)
-        lifecycleScope.launch { vm.settings.collect { syncSecondScreen() } }
+        lifecycleScope.launch { vm.settings.collect { syncSecondScreen(); music.configure(it) } }
     }
 
-    override fun onStart() { super.onStart(); syncSecondScreen() }
-    override fun onStop() { dismissSecondScreen(); super.onStop() }
-    override fun onDestroy() { displays.unregisterDisplayListener(displayListener); super.onDestroy() }
+    override fun onStart() { super.onStart(); syncSecondScreen(); music.resume() }
+    override fun onStop() { music.pause(); dismissSecondScreen(); super.onStop() }
+    override fun onDestroy() {
+        displays.unregisterDisplayListener(displayListener)
+        music.release()
+        super.onDestroy()
+    }
 
     // ---------- second physical display ----------
 
@@ -102,7 +118,8 @@ class MainActivity : ComponentActivity() {
         runCatching {
             presentation = SecondScreen(this, target) {
                 val s by vm.settings.collectAsStateWithLifecycle()
-                DuoTheme(s.theme, s.accent) { TopScreen(vm, Modifier.fillMaxSize()) }
+                val theme by vm.activeTheme.collectAsStateWithLifecycle()
+                DuoTheme(s.theme, theme, s.wallpaper, s.wallpaperDim) { TopScreen(vm, Modifier.fillMaxSize()) }
             }.also { it.show() }
         }
     }
@@ -115,29 +132,31 @@ class MainActivity : ComponentActivity() {
     // ---------- gamepad / d-pad ----------
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        val list = vm.visible.value
-        if (list.isEmpty()) return super.onKeyDown(keyCode, event)
-        val cols = if (vm.settings.value.layout == LibraryLayout.GRID) vm.settings.value.gridColumns else 1
-        val cur = list.indexOfFirst { it.id == vm.selected.value?.id }.coerceAtLeast(0)
-        fun go(i: Int) { vm.select(list[i.coerceIn(0, list.lastIndex)]) }
+        if (vm.screen.value != Screen.HOME || vm.dialog.value != null) return super.onKeyDown(keyCode, event)
+        val tiles = vm.tiles.value
+        val settings = vm.settings.value
+        val cols = if (settings.layout == LibraryLayout.CAROUSEL) 1 else settings.gridColumns
+        val cur = tiles.indexOfFirst { it.key == vm.selected.value?.key }.coerceAtLeast(0)
+        fun go(i: Int) { if (tiles.isNotEmpty()) vm.select(tiles[i.coerceIn(0, tiles.lastIndex)]) }
         return when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> { go(cur - 1); true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { go(cur + 1); true }
             KeyEvent.KEYCODE_DPAD_UP -> { go(cur - cols); true }
             KeyEvent.KEYCODE_DPAD_DOWN -> { go(cur + cols); true }
             KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                Launcher.launch(this, list[cur]); true
+                tiles.getOrNull(cur)?.let { vm.activate(it) }; true
             }
-            KeyEvent.KEYCODE_BUTTON_Y -> { vm.toggleLayout(); true }
-            KeyEvent.KEYCODE_BUTTON_START -> { vm.showSettings.value = !vm.showSettings.value; true }
+            KeyEvent.KEYCODE_BUTTON_B -> {
+                if (vm.tab.value.startsWith("group:")) vm.tab.value = "groups"; true
+            }
+            KeyEvent.KEYCODE_BUTTON_X -> { tiles.getOrNull(cur)?.let { vm.longPress(it) }; true }
+            KeyEvent.KEYCODE_BUTTON_Y -> { vm.cycleLayout(); true }
+            KeyEvent.KEYCODE_BUTTON_START -> { vm.go(Screen.SETTINGS); true }
             KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1 -> {
-                val sys = vm.systemsPresent.value
-                if (sys.isNotEmpty()) {
-                    val order = listOf<String?>(null) + sys.map { it.id }
-                    val i = order.indexOf(vm.systemFilter.value)
-                    val step = if (keyCode == KeyEvent.KEYCODE_BUTTON_R1) 1 else -1
-                    vm.systemFilter.value = order[(i + step + order.size) % order.size]
-                }
+                val order = listOf("all", "fav", "recent", "groups", "apps") + vm.systemsPresent.value.map { "sys:${it.id}" }
+                val i = order.indexOf(vm.tab.value).coerceAtLeast(0)
+                val step = if (keyCode == KeyEvent.KEYCODE_BUTTON_R1) 1 else -1
+                vm.tab.value = order[(i + step + order.size) % order.size]
                 true
             }
             else -> super.onKeyDown(keyCode, event)

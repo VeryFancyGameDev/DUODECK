@@ -16,7 +16,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.duodeck.launcher.data.Pal
+import com.duodeck.launcher.data.ThemeDef
 import com.duodeck.launcher.data.ThemeMode
+import com.duodeck.launcher.data.Themes
 
 data class Duo(
     val dark: Boolean,
@@ -30,39 +33,27 @@ data class Duo(
     val accent: Color,
     val accent2: Color,
     val stroke: Color,
+    val pattern: String,
+    val wallpaper: String?,
+    val dim: Float,
 ) {
     val bg get() = Brush.verticalGradient(listOf(bgTop, bgBottom))
     val accentBrush get() = Brush.verticalGradient(listOf(accent2, accent))
 }
 
-val Accents = listOf(
-    "Sky" to (Color(0xFF1FA8E0) to Color(0xFF6FD6FF)),
-    "Bubblegum" to (Color(0xFFE8509A) to Color(0xFFFF9CCB)),
-    "Mint" to (Color(0xFF1DB98A) to Color(0xFF7DEBC2)),
-    "Sunny" to (Color(0xFFF29B1D) to Color(0xFFFFD36B)),
-    "Grape" to (Color(0xFF7A55E0) to Color(0xFFB79CFF)),
-)
-
-fun duoFor(dark: Boolean, accentIndex: Int): Duo {
-    val (a, a2) = Accents[accentIndex.coerceIn(0, Accents.lastIndex)].second
-    return if (dark) Duo(
-        dark = true,
-        bgTop = Color(0xFF1B2540), bgBottom = Color(0xFF0E1426),
-        dots = Color(0x14FFFFFF),
-        surface = Color(0xFF243055), surfaceHigh = Color(0xFF2E3C6B),
-        text = Color(0xFFF1F5FF), muted = Color(0xFF9FB0D8),
-        accent = a, accent2 = a2, stroke = Color(0x33FFFFFF),
-    ) else Duo(
-        dark = false,
-        bgTop = Color(0xFFF7FBFF), bgBottom = Color(0xFFDCEBF7),
-        dots = Color(0x1A3D8EC9),
-        surface = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFEAF3FB),
-        text = Color(0xFF26324A), muted = Color(0xFF6F809E),
-        accent = a, accent2 = a2, stroke = Color(0x1F26324A),
+fun duoFor(dark: Boolean, def: ThemeDef, wallpaper: String?, dim: Float): Duo {
+    val p: Pal = if (dark) def.dark else def.light
+    return Duo(
+        dark = dark,
+        bgTop = Color(p.bgTop), bgBottom = Color(p.bgBottom), dots = Color(p.dots),
+        surface = Color(p.surface), surfaceHigh = Color(p.surfaceHigh),
+        text = Color(p.text), muted = Color(p.muted),
+        accent = Color(p.accent), accent2 = Color(p.accent2), stroke = Color(p.stroke),
+        pattern = def.pattern, wallpaper = wallpaper, dim = dim,
     )
 }
 
-val LocalDuo = staticCompositionLocalOf { duoFor(false, 0) }
+val LocalDuo = staticCompositionLocalOf { duoFor(false, Themes.builtin.first(), null, 0f) }
 
 val CardShape = RoundedCornerShape(18.dp)
 val PillShape = RoundedCornerShape(50)
@@ -70,13 +61,19 @@ val PillShape = RoundedCornerShape(50)
 private val Rounded = FontFamily.SansSerif
 
 @Composable
-fun DuoTheme(mode: ThemeMode, accent: Int, content: @Composable () -> Unit) {
+fun DuoTheme(
+    mode: ThemeMode,
+    def: ThemeDef,
+    wallpaper: String?,
+    dim: Float,
+    content: @Composable () -> Unit,
+) {
     val dark = when (mode) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val duo = duoFor(dark, accent)
+    val duo = duoFor(dark, def, wallpaper, dim)
     val scheme = if (dark) darkColorScheme(primary = duo.accent, background = duo.bgBottom, surface = duo.surface, onSurface = duo.text)
     else lightColorScheme(primary = duo.accent, background = duo.bgBottom, surface = duo.surface, onSurface = duo.text)
     CompositionLocalProvider(LocalDuo provides duo) {
@@ -92,3 +89,13 @@ fun DuoTheme(mode: ThemeMode, accent: Int, content: @Composable () -> Unit) {
         )
     }
 }
+
+/** Colour pairs for user-made groups. */
+val GroupColors = listOf(
+    Color(0xFF29B6F6) to Color(0xFF81D4FA),
+    Color(0xFFEC407A) to Color(0xFFF8BBD0),
+    Color(0xFF66BB6A) to Color(0xFFC5E1A5),
+    Color(0xFFFFA726) to Color(0xFFFFE0B2),
+    Color(0xFF7E57C2) to Color(0xFFD1C4E9),
+    Color(0xFF26A69A) to Color(0xFFB2DFDB),
+)

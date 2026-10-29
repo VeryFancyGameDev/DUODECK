@@ -1,0 +1,128 @@
+{
+  "themes": [
+    {
+      "id": "aqua",
+      "name": "Aqua Splash",
+      "author": "DuoDeck",
+      "blurb": "Cool turquoise water with floating bubbles.",
+      "pattern": "bubbles",
+      "light": {
+        "bgTop": "#F0FFFE",
+        "bgBottom": "#CFF5F1",
+        "dots": "#2200B8C4",
+        "surface": "#FFFFFF",
+        "surfaceHigh": "#E2FAF8",
+        "text": "#143B40",
+        "muted": "#5C8E91",
+        "accent": "#00B8C4",
+        "accent2": "#66E0E8",
+        "stroke": "#1F143B40"
+      },
+      "dark": {
+        "bgTop": "#0B2A33",
+        "bgBottom": "#06161C",
+        "dots": "#1466E0E8",
+        "surface": "#12414D",
+        "surfaceHigh": "#185766",
+        "text": "#E6FDFF",
+        "muted": "#8FC9CF",
+        "accent": "#12D0DC",
+        "accent2": "#7CEBF2",
+        "stroke": "#33FFFFFF"
+      }
+    },
+    {
+      "id": "candy",
+      "name": "Cotton Candy",
+      "author": "DuoDeck",
+      "blurb": "Sugary pink and lilac.",
+      "pattern": "dots",
+      "light": {
+        "bgTop": "#FFF5FB",
+        "bgBottom": "#FFD9F0",
+        "dots": "#22FF4FA3",
+        "surface": "#FFFFFF",
+        "surfaceHigh": "#FFE9F6",
+        "text": "#4A1F3D",
+        "muted": "#A0709A",
+        "accent": "#FF4FA3",
+        "accent2": "#FFA8D6",
+        "stroke": "#1F4A1F3D"
+      },
+      "dark": {
+        "bgTop": "#2B1033",
+        "bgBottom": "#16081A",
+        "dots": "#14FFA8EA",
+        "surface": "#3A1745",
+        "surfaceHigh": "#4A1E58",
+        "text": "#FFEFFB",
+        "muted": "#D3A3D9",
+        "accent": "#FF6BD6",
+        "accent2": "#FFA8EA",
+        "stroke": "#33FFFFFF"
+      }
+    },
+    {
+      "id": "forest",
+      "name": "Forest Walk",
+      "author": "DuoDeck",
+      "blurb": "Mossy greens with fine pinstripes.",
+      "pattern": "lines",
+      "light": {
+        "bgTop": "#F4FAF0",
+        "bgBottom": "#D6E8CC",
+        "dots": "#1A4C9A2A",
+        "surface": "#FFFFFF",
+        "surfaceHigh": "#EAF4E3",
+        "text": "#23331B",
+        "muted": "#6C8560",
+        "accent": "#4C9A2A",
+        "accent2": "#8FCC6E",
+        "stroke": "#1F23331B"
+      },
+      "dark": {
+        "bgTop": "#14261A",
+        "bgBottom": "#0A140D",
+        "dots": "#128FCC6E",
+        "surface": "#1D3524",
+        "surfaceHigh": "#26452F",
+        "text": "#EEFBE8",
+        "muted": "#9CC48D",
+        "accent": "#6CC04A",
+        "accent2": "#A6E08A",
+        "stroke": "#33FFFFFF"
+      }
+    },
+    {
+      "id": "express",
+      "name": "Midnight Express",
+      "author": "DuoDeck",
+      "blurb": "Deep blue night with a glowing grid.",
+      "pattern": "grid",
+      "light": {
+        "bgTop": "#F2F5FF",
+        "bgBottom": "#D5DEFA",
+        "dots": "#1A3B5BDB",
+        "surface": "#FFFFFF",
+        "surfaceHigh": "#E7ECFD",
+        "text": "#1B2447",
+        "muted": "#6B76A6",
+        "accent": "#3B5BDB",
+        "accent2": "#8EA2FF",
+        "stroke": "#1F1B2447"
+      },
+      "dark": {
+        "bgTop": "#0E1330",
+        "bgBottom": "#05081A",
+        "dots": "#2A5B7BFF",
+        "surface": "#171E45",
+        "surfaceHigh": "#1F2958",
+        "text": "#EEF1FF",
+        "muted": "#9AA6E0",
+        "accent": "#5B7BFF",
+        "accent2": "#A5B6FF",
+        "stroke": "#445B7BFF"
+      }
+    }
+  ]
+}

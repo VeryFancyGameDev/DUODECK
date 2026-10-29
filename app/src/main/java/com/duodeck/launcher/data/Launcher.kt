@@ -1,68 +1,137 @@
 package com.duodeck.launcher.data
 
-import android.content.ComponentName
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.widget.Toast
 
-/** Starts a game in whichever installed emulator fits the system. Best-effort; see README. */
+data class Resolved(val pkg: String?, val known: KnownEmu?, val mode: LaunchMode, val core: String?)
+
+/** Starts a game in whichever emulator fits (user override → first installed known emulator). */
 object Launcher {
 
-    private val retroarchCores = mapOf(
-        "nes" to "fceumm", "snes" to "snes9x", "gb" to "gambatte", "gbc" to "gambatte",
-        "gba" to "mgba", "genesis" to "genesis_plus_gx", "n64" to "mupen64plus_next",
-        "psx" to "pcsx_rearmed", "arcade" to "fbneo", "nds" to "melonds", "psp" to "ppsspp",
-    )
+    private const val GRANT = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
 
-    fun installed(ctx: Context, system: GameSystem): String? =
-        system.emulators.firstOrNull { ctx.packageManager.getLaunchIntentForPackage(it) != null }
+    fun isInstalled(ctx: Context, pkg: String): Boolean =
+        ctx.packageManager.getLaunchIntentForPackage(pkg) != null
 
-    fun launch(ctx: Context, game: Game, forceChooser: Boolean = false) {
-        val system = Systems.get(game.systemId) ?: return
-        val pkg = installed(ctx, system)
+    /** Known emulators for [system] that are actually installed. */
+    fun candidates(ctx: Context, system: GameSystem): List<KnownEmu> =
+        system.emulators.mapNotNull { Emulators.byPkg[it] }.filter { isInstalled(ctx, it.pkg) }
+
+    fun installed(ctx: Context, system: GameSystem): String? = candidates(ctx, system).firstOrNull()?.pkg
+
+    fun resolve(ctx: Context, systemId: String, gameId: String?, user: UserState): Resolved {
+        val system = Systems.get(systemId)
+        val profile = (gameId?.let { user.profiles["game:$it"] }) ?: user.profiles[systemId] ?: LaunchProfile()
+        val pkg = profile.pkg?.takeIf { isInstalled(ctx, it) } ?: system?.let { installed(ctx, it) }
+        val known = pkg?.let { Emulators.byPkg[it] }
+        val mode = if (profile.mode != LaunchMode.AUTO) profile.mode else known?.mode ?: LaunchMode.VIEW_URI
+        val core = profile.core ?: Emulators.coresFor(systemId).firstOrNull()
+        return Resolved(pkg, known, mode, core)
+    }
+
+    fun launchGame(ctx: Context, game: Game, user: UserState, forceChooser: Boolean = false) {
+        val r = resolve(ctx, game.systemId, game.id, user)
         val uri = Uri.parse(game.uri)
 
-        if (pkg == null || forceChooser) {
-            val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "*/*")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { ctx.startActivity(Intent.createChooser(view, "Open ${game.title} with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { toast(ctx, "No emulator found for ${system.short}") }
+        if (r.pkg == null || forceChooser) {
+            val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "*/*").addFlags(GRANT)
+            view.clipData = ClipData.newRawUri("rom", uri)
+            runCatching {
+                ctx.startActivity(Intent.createChooser(view, "Open ${game.title} with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { toast(ctx, "No app found for ${Systems.get(game.systemId)?.short ?: "this game"}") }
             return
         }
 
-        val intent = (if (pkg.startsWith("com.retroarch")) retroArchIntent(pkg, system, uri) else null)
-            ?: Intent(Intent.ACTION_VIEW).setPackage(pkg).setDataAndType(uri, "*/*")
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        for (intent in attempts(r, r.pkg, game, uri)) {
+            try {
+                ctx.startActivity(intent)
+                return
+            } catch (_: Exception) { /* try the next form */ }
+        }
+        // Last resort: just open the emulator so the user isn't left staring at DuoDeck.
+        ctx.packageManager.getLaunchIntentForPackage(r.pkg)?.let {
+            ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            toast(ctx, "Opened ${r.known?.label ?: r.pkg}, but it wouldn't take the game. Try another launch style in Settings → Emulators.")
+        } ?: toast(ctx, "Couldn't start the emulator")
+    }
 
-        runCatching { ctx.startActivity(intent) }.onFailure {
-            // Fall back to simply opening the emulator.
-            ctx.packageManager.getLaunchIntentForPackage(pkg)?.let { ctx.startActivity(it) }
-                ?: toast(ctx, "Couldn't start the emulator")
+    fun launchApp(ctx: Context, pkg: String) {
+        val i = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        if (i == null) { toast(ctx, "That app isn't installed"); return }
+        ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    // ---------------------------------------------------------------- intents
+
+    private fun attempts(r: Resolved, pkg: String, game: Game, uri: Uri): List<Intent> {
+        val known = r.known
+        return when (r.mode) {
+            LaunchMode.RETROARCH -> listOfNotNull(retroArch(pkg, known, r.core, game.systemId, uri))
+                .plus(view(pkg, known, uri, withComponent = false, withType = true))
+            LaunchMode.DOLPHIN -> listOf(
+                dolphin(pkg, known, uri, withComponent = true),
+                dolphin(pkg, known, uri, withComponent = false),
+                view(pkg, known, uri, withComponent = false, withType = false),
+            )
+            else -> listOf(
+                view(pkg, known, uri, withComponent = true, withType = true),
+                view(pkg, known, uri, withComponent = false, withType = true),
+                view(pkg, known, uri, withComponent = false, withType = false),
+            )
         }
     }
 
-    /** RetroArch wants real file paths + a core, so convert the SAF URI where possible. */
-    private fun retroArchIntent(pkg: String, system: GameSystem, uri: Uri): Intent? {
+    private fun view(pkg: String, known: KnownEmu?, uri: Uri, withComponent: Boolean, withType: Boolean): Intent =
+        Intent(known?.action ?: Intent.ACTION_VIEW).apply {
+            val act = known?.activity
+            if (withComponent && act != null) setClassName(pkg, act) else setPackage(pkg)
+            if (withType) setDataAndType(uri, "*/*") else data = uri
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or GRANT)
+            clipData = ClipData.newRawUri("rom", uri)
+            known?.extra?.let { key ->
+                putExtra(key, if (known?.usePath == true) (toFilePath(uri) ?: uri.toString()) else uri.toString())
+            }
+        }
+
+    /**
+     * Dolphin reads the game from ACTION_VIEW data and/or the AutoStartFiles extra on its main
+     * activity. We send both, with a URI grant on the clip data so the content:// URI is readable.
+     */
+    private fun dolphin(pkg: String, known: KnownEmu?, uri: Uri, withComponent: Boolean): Intent =
+        Intent(Intent.ACTION_VIEW).apply {
+            if (withComponent) setClassName(pkg, known?.activity ?: Emulators.DOLPHIN_ACTIVITY) else setPackage(pkg)
+            data = uri
+            putExtra("AutoStartFiles", arrayOf(uri.toString()))
+            putExtra("AutoStartFile", uri.toString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or GRANT)
+            clipData = ClipData.newRawUri("rom", uri)
+        }
+
+    /** RetroArch needs a real file path plus the core to load. */
+    private fun retroArch(pkg: String, known: KnownEmu?, core: String?, systemId: String, uri: Uri): Intent? {
         val path = toFilePath(uri) ?: return null
-        val core = retroarchCores[system.id] ?: return null
-        val dataDir = "/data/data/$pkg"
+        val c = core ?: Emulators.coresFor(systemId).firstOrNull() ?: return null
         return Intent().apply {
-            component = ComponentName(pkg, "com.retroarch.browser.retroactivity.RetroActivityFuture")
+            setClassName(pkg, known?.activity ?: Emulators.RA_ACTIVITY)
             putExtra("ROM", path)
-            putExtra("LIBRETRO", "$dataDir/cores/${core}_libretro_android.so")
+            putExtra("LIBRETRO", "/data/data/$pkg/cores/${c}_libretro_android.so")
             putExtra("CONFIGFILE", "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg")
             putExtra("QUITFOCUS", "")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
     }
 
     /** content://…/document/primary:Roms/GBA/x.gba  ->  /storage/emulated/0/Roms/GBA/x.gba */
     fun toFilePath(uri: Uri): String? {
         val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull() ?: return null
-        val (volume, rel) = docId.split(':', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-        return if (volume == "primary") "/storage/emulated/0/$rel" else "/storage/$volume/$rel"
+        val parts = docId.split(':', limit = 2)
+        if (parts.size < 2) return null
+        return if (parts[0] == "primary") "/storage/emulated/0/${parts[1]}" else "/storage/${parts[0]}/${parts[1]}"
     }
 
-    private fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+    private fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
 }

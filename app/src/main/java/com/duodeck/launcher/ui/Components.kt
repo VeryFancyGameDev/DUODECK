@@ -8,67 +8,113 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.graphics.drawable.toBitmap
 import coil.compose.AsyncImage
 import com.duodeck.launcher.data.Game
 import com.duodeck.launcher.data.RaProgress
 import com.duodeck.launcher.data.Systems
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.random.Random
 
-/** The 3DS-style halftone dot wallpaper. */
+/** Themed wallpaper: user image if set, otherwise the theme's pattern (dots, lines, grid, bubbles). */
 @Composable
 fun DotBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val duo = LocalDuo.current
     Box(modifier.background(duo.bg)) {
-        Canvas(Modifier.matchParentSize()) {
-            val step = 26.dp.toPx()
-            val r = 2.6.dp.toPx()
-            var y = step / 2
-            var row = 0
-            while (y < size.height + step) {
-                var x = if (row % 2 == 0) step / 2 else step
-                while (x < size.width + step) {
-                    drawCircle(duo.dots, r, androidx.compose.ui.geometry.Offset(x, y))
-                    x += step
-                }
-                y += step; row++
-            }
+        if (duo.wallpaper != null) {
+            AsyncImage(
+                model = duo.wallpaper, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            Box(Modifier.matchParentSize().background(duo.bgBottom.copy(alpha = duo.dim.coerceIn(0f, 0.95f))))
+        } else {
+            Canvas(Modifier.matchParentSize()) { drawPattern(duo) }
         }
         content()
     }
 }
 
-/** Squishy press animation used on every tappable thing. */
+private fun DrawScope.drawPattern(duo: Duo) {
+    when (duo.pattern) {
+        "none" -> Unit
+        "lines" -> {
+            val step = 20.dp.toPx()
+            var y = step
+            while (y < size.height) {
+                drawLine(duo.dots, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+                y += step
+            }
+        }
+        "grid" -> {
+            val step = 30.dp.toPx()
+            var y = step
+            while (y < size.height) { drawLine(duo.dots, Offset(0f, y), Offset(size.width, y), 1.dp.toPx()); y += step }
+            var x = step
+            while (x < size.width) { drawLine(duo.dots, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx()); x += step }
+        }
+        "bubbles" -> {
+            val r = Random(7)
+            repeat(24) {
+                drawCircle(
+                    duo.dots, r.nextFloat() * 30.dp.toPx() + 8.dp.toPx(),
+                    Offset(r.nextFloat() * size.width, r.nextFloat() * size.height),
+                )
+            }
+        }
+        else -> {
+            val step = 26.dp.toPx()
+            val radius = 2.6.dp.toPx()
+            var y = step / 2
+            var row = 0
+            while (y < size.height + step) {
+                var x = if (row % 2 == 0) step / 2 else step
+                while (x < size.width + step) {
+                    drawCircle(duo.dots, radius, Offset(x, y))
+                    x += step
+                }
+                y += step; row++
+            }
+        }
+    }
+}
+
+/** Squishy press animation used on every tappable thing, with optional long-press. */
 @Composable
 fun Modifier.bounceClick(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier {
     var pressed by remember { mutableStateOf(false) }
@@ -107,7 +153,6 @@ fun StatusStrip(modifier: Modifier = Modifier) {
         Text(SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(now),
             color = duo.muted, fontWeight = FontWeight.Medium, fontSize = 12.sp)
         Spacer(Modifier.weight(1f))
-        // tiny battery glyph
         Box(Modifier.size(width = 26.dp, height = 12.dp).clip(RoundedCornerShape(4.dp))
             .border(1.5.dp, duo.muted, RoundedCornerShape(4.dp)).padding(2.dp)) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(battery / 100f)
@@ -125,37 +170,50 @@ private fun batteryPercent(ctx: Context): Int {
     return (level * 100 / scale).coerceIn(0, 100)
 }
 
-/** Cover art if we have it, otherwise a cheerful gradient tile with the game's initials. */
+/** Cover art if we have it, otherwise a cheerful gradient tile with the game's initials. Caller sets the shape/aspect. */
 @Composable
-fun Cover(game: Game, artUrl: String?, modifier: Modifier = Modifier, corner: Dp = 14.dp) {
+fun Cover(game: Game, artUrl: String?, modifier: Modifier = Modifier, corner: Dp = 14.dp, showSystem: Boolean = true) {
     val system = Systems.get(game.systemId)
     val a = system?.colorA ?: Color(0xFF29B6F6)
     val b = system?.colorB ?: Color(0xFF81D4FA)
     val shape = RoundedCornerShape(corner)
     Box(modifier.clip(shape).background(Brush.linearGradient(listOf(a, b)))) {
-        // gloss highlight
-        Box(Modifier.fillMaxWidth().fillMaxHeight(0.5f).background(
-            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.28f), Color.Transparent))))
         if (artUrl != null) {
             AsyncImage(model = artUrl, contentDescription = game.title,
                 contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
         } else {
             Column(Modifier.align(Alignment.Center).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(initials(game.title), color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 30.sp)
-                Text(game.title, color = Color.White.copy(alpha = 0.92f), fontSize = 11.sp, maxLines = 2,
-                    overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(initials(game.title), color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp)
+                Text(game.title, color = Color.White.copy(alpha = 0.92f), fontSize = 10.sp, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             }
         }
-        Text(system?.short ?: "", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(PillShape)
-                .background(Color.Black.copy(alpha = 0.35f)).padding(horizontal = 7.dp, vertical = 2.dp))
+        // glossy highlight, like the 3DS icons
+        Box(Modifier.fillMaxWidth().fillMaxHeight(0.45f).background(
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.26f), Color.Transparent))))
+        if (showSystem) {
+            Text(system?.short ?: "", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(PillShape)
+                    .background(Color.Black.copy(alpha = 0.38f)).padding(horizontal = 6.dp, vertical = 2.dp))
+        }
     }
 }
 
 private fun initials(t: String): String =
     t.split(' ', '-', ':').filter { it.isNotBlank() && it.first().isLetterOrDigit() }
         .take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+
+/** The launcher icon of an installed app. */
+@Composable
+fun AppIcon(pkg: String, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val bmp by produceState<ImageBitmap?>(null, pkg) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { ctx.packageManager.getApplicationIcon(pkg).toBitmap(160, 160).asImageBitmap() }.getOrNull()
+        }
+    }
+    bmp?.let { Image(it, null, modifier) }
+}
 
 /** Round glossy button — the little bubble icons on the 3DS home menu. */
 @Composable
@@ -191,10 +249,10 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
 fun RaBadge(p: RaProgress, modifier: Modifier = Modifier) {
     val gold = Color(0xFFF5B301)
     Row(modifier.clip(PillShape).background(Color.Black.copy(alpha = 0.55f))
-        .padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("🏆", fontSize = 10.sp)
+        .padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("🏆", fontSize = 9.sp)
         Spacer(Modifier.width(3.dp))
-        Text("${p.awarded}/${p.max}", color = gold, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+        Text("${p.awarded}/${p.max}", color = gold, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
@@ -203,4 +261,29 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     val duo = LocalDuo.current
     Text(text.uppercase(), color = duo.accent, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp,
         letterSpacing = 1.2.sp, modifier = modifier.padding(top = 18.dp, bottom = 6.dp))
+}
+
+/** Rounded card used inside dialogs and settings. */
+@Composable
+fun DuoCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val duo = LocalDuo.current
+    Column(modifier.fillMaxWidth().clip(CardShape).background(duo.surface)
+        .border(1.dp, duo.stroke, CardShape).padding(16.dp), content = content)
+}
+
+/** Centered popup with the app's look. */
+@Composable
+fun DuoDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val duo = LocalDuo.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(duo.surface)
+                .border(1.dp, duo.stroke, RoundedCornerShape(24.dp)).padding(18.dp),
+        ) {
+            Text(title, color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            content()
+        }
+    }
 }

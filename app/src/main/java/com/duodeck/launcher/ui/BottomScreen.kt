@@ -1,6 +1,5 @@
 package com.duodeck.launcher.ui
 
-import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,11 +8,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.items as rowItems
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,173 +24,242 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.coerceAtMost
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.duodeck.launcher.LibraryViewModel
-import com.duodeck.launcher.data.*
+import com.duodeck.launcher.*
+import com.duodeck.launcher.data.LibraryLayout
 import kotlinx.coroutines.launch
 
-/** The "touch screen": system tabs, the game grid/carousel and the action bar. */
+/** The "touch screen": tabs, the tile browser (pages / grid / carousel) and the bubble action bar. */
 @Composable
 fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modifier = Modifier) {
-    val duo = LocalDuo.current
-    val ctx = LocalContext.current
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val visible by vm.visible.collectAsStateWithLifecycle()
+    val tiles by vm.tiles.collectAsStateWithLifecycle()
     val systems by vm.systemsPresent.collectAsStateWithLifecycle()
-    val filter by vm.systemFilter.collectAsStateWithLifecycle()
+    val tab by vm.tab.collectAsStateWithLifecycle()
     val scanning by vm.scanning.collectAsStateWithLifecycle()
     val scanCount by vm.scanCount.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
+    val user by vm.user.collectAsStateWithLifecycle()
+    val art by vm.art.collectAsStateWithLifecycle()
+    val progress by vm.progress.collectAsStateWithLifecycle()
+    val games by vm.games.collectAsStateWithLifecycle()
     var searching by remember { mutableStateOf(false) }
+
+    val byId = remember(games) { games.associateBy { it.id } }
+    val env = TileEnv(art, progress, user.favorites, byId, settings.showLabels)
+
+    val onTile: (Tile) -> Unit = { t ->
+        if (settings.tapToLaunch || t is AddTile || t is GroupTile || t.key == selected?.key) vm.activate(t) else vm.select(t)
+    }
+    val onLong: (Tile) -> Unit = { vm.longPress(it) }
+
+    val gameTab = tab == "all" || tab == "fav" || tab == "recent" || tab.startsWith("sys:") || tab.startsWith("group:")
+    val needsRoms = games.isEmpty() && settings.romsUris.isEmpty() && gameTab
 
     DotBackground(modifier) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(top = 10.dp)) {
-            if (settings.romsUri != null) {
-                // ---- system tabs ----
-                LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item { Pill("All", filter == null, { vm.systemFilter.value = null }) }
-                    rowItems(systems) { s ->
-                        Pill(s.short, filter == s.id, { vm.systemFilter.value = s.id }, tint = s.colorA)
+            // ---- tabs ----
+            LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (tab.startsWith("group:")) {
+                    val g = user.groups.firstOrNull { "group:${it.id}" == tab }
+                    item { Pill("‹ Groups", false, { vm.tab.value = "groups" }) }
+                    item { Pill(g?.name ?: "Group", true, {}, tint = GroupColors[(g?.colorIdx ?: 0).coerceIn(0, GroupColors.lastIndex)].first) }
+                } else {
+                    item { Pill("All", tab == "all", { vm.tab.value = "all" }) }
+                    item { Pill("★", tab == "fav", { vm.tab.value = "fav" }) }
+                    item { Pill("Recent", tab == "recent", { vm.tab.value = "recent" }) }
+                    item { Pill("Groups", tab == "groups", { vm.tab.value = "groups" }) }
+                    item { Pill("Apps", tab == "apps", { vm.tab.value = "apps" }) }
+                    items(systems.size) { i ->
+                        val s = systems[i]
+                        Pill(s.short, tab == "sys:${s.id}", { vm.tab.value = "sys:${s.id}" }, tint = s.colorA)
                     }
                 }
-                if (searching) {
-                    Spacer(Modifier.height(8.dp))
-                    SearchField(query, { vm.query.value = it }, Modifier.padding(horizontal = 14.dp))
-                }
+            }
+            if (searching) {
+                Spacer(Modifier.height(8.dp))
+                SearchField(query, { vm.query.value = it }, Modifier.padding(horizontal = 14.dp))
             }
 
             Box(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
                 when {
-                    settings.romsUri == null -> Onboarding(onPickFolder)
-                    visible.isEmpty() && scanning -> Centered("Scanning your library…\n$scanCount games found so far")
-                    visible.isEmpty() -> Centered(
-                        if (vm.games.value.isEmpty()) "No games found in that folder.\nTip: use subfolders named like GBA, SNES, PSP."
-                        else "No games match.")
-                    settings.layout == LibraryLayout.GRID -> GridView(vm, settings.gridColumns, ctx)
-                    else -> CarouselView(vm, ctx)
+                    needsRoms -> Onboarding(onPickFolder)
+                    tiles.isEmpty() && scanning -> Centered("Scanning your library…\n$scanCount games found so far")
+                    tiles.isEmpty() -> Centered(emptyMessage(tab, games.isEmpty()))
+                    settings.layout == LibraryLayout.PAGES ->
+                        PagesView(tiles, selected, env, settings.gridColumns, onTile, onLong)
+                    settings.layout == LibraryLayout.GRID ->
+                        GridView(tiles, selected, env, settings.gridColumns, onTile, onLong)
+                    else -> CarouselView(vm, tiles, selected, env, onTile, onLong)
                 }
             }
 
             // ---- action bar ----
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                GlossyIcon(if (settings.layout == LibraryLayout.GRID) Icons.Filled.ViewCarousel else Icons.Filled.GridView,
-                    "Switch layout", { vm.toggleLayout() })
+                GlossyIcon(
+                    when (settings.layout) {
+                        LibraryLayout.PAGES -> Icons.Filled.ViewModule
+                        LibraryLayout.GRID -> Icons.Filled.GridView
+                        LibraryLayout.CAROUSEL -> Icons.Filled.ViewCarousel
+                    }, "Switch layout", { vm.cycleLayout() })
                 GlossyIcon(Icons.Filled.Search, "Search", {
                     searching = !searching; if (!searching) vm.query.value = ""
                 }, active = searching)
+                GlossyIcon(if (tab == "apps") Icons.Filled.Add else Icons.Filled.CreateNewFolder, "Add", {
+                    vm.show(if (tab == "apps") Dlg.AddApp else Dlg.NewGroup())
+                })
                 GlossyIcon(Icons.Filled.Refresh, "Rescan library", { vm.rescan() }, active = scanning)
-                GlossyIcon(Icons.Filled.Settings, "Settings", { vm.showSettings.value = true }, size = 54.dp, active = true)
+                GlossyIcon(Icons.Filled.Settings, "Settings", { vm.go(Screen.SETTINGS) }, size = 54.dp, active = true)
             }
         }
     }
 }
 
-@Composable
-private fun GridView(vm: LibraryViewModel, columns: Int, ctx: Context) {
-    val visible by vm.visible.collectAsStateWithLifecycle()
-    val art by vm.art.collectAsStateWithLifecycle()
-    val progress by vm.progress.collectAsStateWithLifecycle()
-    val selected by vm.selected.collectAsStateWithLifecycle()
-    val duo = LocalDuo.current
-    val gridState = rememberLazyGridState()
-
-    // Keep the selected tile on screen when moving with a d-pad.
-    LaunchedEffect(selected?.id) {
-        val idx = visible.indexOfFirst { it.id == selected?.id }
-        if (idx >= 0 && gridState.layoutInfo.visibleItemsInfo.none { it.index == idx }) {
-            gridState.animateScrollToItem(idx)
-        }
-    }
-
-    LazyVerticalGrid(GridCells.Fixed(columns), Modifier.fillMaxSize(), state = gridState,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(visible, key = { it.id }) { g ->
-            val isSel = g.id == selected?.id
-            val s by animateFloatAsState(if (isSel) 1.06f else 1f, label = "sel")
-            Box(Modifier.scale(s).bounceClick(
-                onLongClick = { Launcher.launch(ctx, g, forceChooser = true) },
-                onClick = { if (isSel) Launcher.launch(ctx, g) else vm.select(g) })) {
-                Cover(g, art[g.id], Modifier.fillMaxWidth().aspectRatio(0.75f)
-                    .then(if (isSel) Modifier.border(3.dp, duo.accent, androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) else Modifier))
-                progress[RetroAchievements.normalise(g.title)]?.let {
-                    if (it.max > 0) RaBadge(it, Modifier.align(Alignment.BottomEnd).padding(5.dp))
-                }
-            }
-        }
-    }
+private fun emptyMessage(tab: String, noGames: Boolean): String = when {
+    tab == "fav" -> "No favourites yet.\nLong-press a game and choose Favourite."
+    tab == "recent" -> "Games you play will show up here."
+    tab.startsWith("group:") -> "This group is empty.\nLong-press a game and choose Add to group."
+    noGames -> "No games found in your folder.\nTip: use subfolders named like GBA, SNES, Switch, PSP."
+    else -> "Nothing matches."
 }
 
+// ---------------------------------------------------------------- layouts
+
 @Composable
-private fun CarouselView(vm: LibraryViewModel, ctx: Context) {
-    val visible by vm.visible.collectAsStateWithLifecycle()
-    val art by vm.art.collectAsStateWithLifecycle()
-    val progress by vm.progress.collectAsStateWithLifecycle()
+private fun PagesView(
+    tiles: List<Tile>, selected: Tile?, env: TileEnv, columns: Int,
+    onTile: (Tile) -> Unit, onLong: (Tile) -> Unit,
+) {
     val duo = LocalDuo.current
-    val state = rememberLazyListState()
-    val fling = rememberSnapFlingBehavior(state)
-
-    // The item resting in the middle is the selected one.
-    val center by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val selectedNow by vm.selected.collectAsStateWithLifecycle()
-    // Only adopt the centred item once scrolling settles, so key-driven scrolls don't fight the user.
-    LaunchedEffect(center, state.isScrollInProgress, visible) {
-        if (!state.isScrollInProgress) visible.getOrNull(center)?.let { vm.select(it) }
-    }
-    // A d-pad/gamepad move changes the selection: scroll the carousel to it.
-    LaunchedEffect(selectedNow?.id) {
-        val idx = visible.indexOfFirst { it.id == selectedNow?.id }
-        if (idx >= 0 && idx != state.firstVisibleItemIndex && !state.isScrollInProgress) state.animateScrollToItem(idx)
-    }
-
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val itemW = (maxHeight * 0.62f * 0.75f).coerceAtMost(maxWidth * 0.6f)
-        val side = (maxWidth - itemW) / 2
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-            LazyRow(state = state, flingBehavior = fling, contentPadding = PaddingValues(horizontal = side),
-                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().weight(1f)) {
-                itemsIndexed(visible, key = { _, g -> g.id }) { i, g ->
-                    val isCenter = i == center
-                    val s by animateFloatAsState(if (isCenter) 1f else 0.78f, label = "carousel")
-                    val scope = rememberCoroutineScope()
-                    Box(Modifier.width(itemW).scale(s).bounceClick(
-                        onLongClick = { Launcher.launch(ctx, g, forceChooser = true) },
-                        onClick = {
-                            if (isCenter) Launcher.launch(ctx, g)
-                            else scope.launch { state.animateScrollToItem(i) }
-                        })) {
-                        Cover(g, art[g.id], Modifier.fillMaxWidth().aspectRatio(0.75f), corner = 22.dp)
-                        progress[RetroAchievements.normalise(g.title)]?.let {
-                            if (it.max > 0) RaBadge(it, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+        val gap = 12.dp
+        val pad = 14.dp
+        val tileW: Dp = (maxWidth - pad * 2 - gap * (columns - 1)) / columns
+        val labelH = if (env.showLabel) 22.dp else 0.dp
+        val dotsH = 22.dp
+        val rows = (((maxHeight - dotsH) + gap) / (tileW + labelH + gap)).toInt().coerceAtLeast(1)
+        val per = rows * columns
+        val pages = remember(tiles, per) { tiles.chunked(per) }
+        val pager = rememberPagerState(pageCount = { pages.size })
+        val scope = rememberCoroutineScope()
+
+        LaunchedEffect(selected?.key, per) {
+            val idx = tiles.indexOfFirst { it.key == selected?.key }
+            if (idx >= 0 && pager.currentPage != idx / per) pager.animateScrollToPage(idx / per)
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { page ->
+                Column(Modifier.fillMaxSize().padding(horizontal = pad), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    for (r in 0 until rows) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            for (c in 0 until columns) {
+                                val t = pages[page].getOrNull(r * columns + c)
+                                if (t != null) {
+                                    TileView(t, t.key == selected?.key, env, Modifier.weight(1f),
+                                        onClick = { onTile(t) }, onLongClick = { onLong(t) })
+                                } else Spacer(Modifier.weight(1f))
+                            }
                         }
                     }
                 }
             }
-            val g = visible.getOrNull(center)
-            Text(g?.title ?: "", color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp,
-                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            if (pages.size > 1) {
+                Row(Modifier.fillMaxWidth().height(dotsH), horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    for (i in pages.indices) {
+                        val on = i == pager.currentPage
+                        Box(Modifier.padding(horizontal = 4.dp).size(if (on) 9.dp else 7.dp).clip(CircleShape)
+                            .background(if (on) duo.accent else duo.muted.copy(alpha = 0.4f))
+                            .bounceClick { scope.launch { pager.animateScrollToPage(i) } })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridView(
+    tiles: List<Tile>, selected: Tile?, env: TileEnv, columns: Int,
+    onTile: (Tile) -> Unit, onLong: (Tile) -> Unit,
+) {
+    val state = rememberLazyGridState()
+    LaunchedEffect(selected?.key) {
+        val idx = tiles.indexOfFirst { it.key == selected?.key }
+        if (idx >= 0 && state.layoutInfo.visibleItemsInfo.none { it.index == idx }) state.animateScrollToItem(idx)
+    }
+    LazyVerticalGrid(GridCells.Fixed(columns), Modifier.fillMaxSize(), state = state,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(tiles.size, key = { tiles[it].key }) { i ->
+            val t = tiles[i]
+            TileView(t, t.key == selected?.key, env, onClick = { onTile(t) }, onLongClick = { onLong(t) })
+        }
+    }
+}
+
+@Composable
+private fun CarouselView(
+    vm: LibraryViewModel, tiles: List<Tile>, selected: Tile?, env: TileEnv,
+    onTile: (Tile) -> Unit, onLong: (Tile) -> Unit,
+) {
+    val duo = LocalDuo.current
+    val state = rememberLazyListState()
+    val fling = rememberSnapFlingBehavior(state)
+    val center by remember { derivedStateOf { state.firstVisibleItemIndex } }
+
+    // Adopt the centred tile once scrolling settles.
+    LaunchedEffect(center, state.isScrollInProgress, tiles) {
+        if (!state.isScrollInProgress) tiles.getOrNull(center)?.let { vm.select(it) }
+    }
+    // A d-pad / gamepad move changes the selection: scroll the carousel to it.
+    LaunchedEffect(selected?.key) {
+        val idx = tiles.indexOfFirst { it.key == selected?.key }
+        if (idx >= 0 && idx != state.firstVisibleItemIndex && !state.isScrollInProgress) state.animateScrollToItem(idx)
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val itemW = (maxHeight * 0.62f).coerceAtMost(maxWidth * 0.6f)
+        val side = (maxWidth - itemW) / 2
+        val scope = rememberCoroutineScope()
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+            LazyRow(state = state, flingBehavior = fling, contentPadding = PaddingValues(horizontal = side),
+                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().weight(1f)) {
+                itemsIndexed(tiles, key = { _, t -> t.key }) { i, t ->
+                    val isCenter = i == center
+                    val s by animateFloatAsState(if (isCenter) 1f else 0.78f, label = "carousel")
+                    Box(Modifier.width(itemW).scale(s)) {
+                        TileView(t, false, env.copy(showLabel = false), Modifier.fillMaxWidth(),
+                            onClick = { if (isCenter) onTile(t) else scope.launch { state.animateScrollToItem(i) } },
+                            onLongClick = { onLong(t) })
+                    }
+                }
+            }
+            Text(tiles.getOrNull(center)?.let { tileLabel(it) } ?: "", color = duo.text,
+                fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, textAlign = TextAlign.Center,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp))
-            Text("${center + 1} / ${visible.size}", color = duo.muted, fontSize = 12.sp,
+            Text("${center + 1} / ${tiles.size}", color = duo.muted, fontSize = 12.sp,
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
     }
 }
+
+// ---------------------------------------------------------------- misc
 
 @Composable
 private fun Onboarding(onPick: () -> Unit) {
@@ -228,6 +297,6 @@ private fun SearchField(value: String, onChange: (String) -> Unit, modifier: Mod
         modifier = modifier.fillMaxWidth().clip(PillShape).background(duo.surface)
             .border(1.dp, duo.stroke, PillShape).padding(horizontal = 16.dp, vertical = 10.dp),
         decorationBox = { inner ->
-            Box { if (value.isEmpty()) Text("Search games…", color = duo.muted, fontSize = 15.sp); inner() }
+            Box { if (value.isEmpty()) Text("Search…", color = duo.muted, fontSize = 15.sp); inner() }
         })
 }

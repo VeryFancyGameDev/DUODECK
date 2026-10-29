@@ -1,31 +1,22 @@
 # DuoDeck
 
-A playful, 3DS-style dual-screen game launcher for Android, in the spirit of iiSU, Pocket Pass and Socket.
+A playful, 3DS / Wii U-style dual-screen game launcher for Android, in the spirit of iiSU, Pocket Pass and Socket.
 
-- **Top screen**: big cover art, title, system, RetroAchievements progress bar and a PLAY button.
-- **Bottom screen**: system tabs, search, a **grid** or **carousel** game browser, and a bubble-icon action bar.
-- **Dual screen**: on a device with a second physical display the top screen goes there; on a single screen the two stack (portrait) or sit side by side (landscape).
-- Light / dark / system theme, five accent colours, dotted 3DS wallpaper, glossy gradient icons, squishy press animations.
-- **RetroAchievements**: points, rank and per-game progress badges.
-- **SteamGridDB**: automatic cover art, cached on disk. Works without a key (colourful placeholder tiles).
-- Gamepad/D-pad: D-pad moves, A launches, Y swaps grid/carousel, L1/R1 change system, Start opens settings.
-- Can be set as your Android home app.
+- **Top screen**: big square art, title, system, RetroAchievements progress, which emulator will run it, PLAY, your avatar and recently played.
+- **Bottom screen**: tabs (All, Favourites, Recent, Groups, Apps, one per system) and square tiles in **pages** (Wii U style), a scrolling **grid**, or a **carousel**.
+- **Groups**: make folders of games; long-press a game → Add to group.
+- **Apps**: add any installed app as a tile.
+- **Box art**: SteamGridDB automatic square covers, or long-press → Change box art to browse options or upload your own image.
+- **Emulators & cores**: Settings → Emulators & cores (or per game via long-press). Choose app, launch style and RetroArch core. Switch (Eden, Yuzu, Citron, Sudachi…), Dolphin, PPSSPP, Azahar, melonDS, DuckStation, NetherSX2, Flycast, Redream, RetroArch supported.
+- **Theme Store**: install themes from `themes/index.json` in this repo, import/share theme files, light and dark for each, custom wallpaper.
+- **Home menu music**: original built-in loops, your own audio file, or off.
+- **Avatar maker**: original Mii-style character creator.
+- Gamepad: D-pad moves, A launches, X opens the game menu, B backs out of a group, Y changes layout, L1/R1 change tab, Start opens settings.
 
-## Get the APK with no setup (GitHub does the build)
+## Build
 
-1. Create a new empty GitHub repository.
-2. Upload the contents of this folder (keep the `.github` folder).
-3. Open the **Actions** tab, wait for **Build APK** to turn green (about 5 minutes).
-4. Open the run, download the **DuoDeck-apk** artifact, unzip, and install `app-release.apk` on your device.
+Push to GitHub; the **Build APK** workflow produces `DuoDeck-apk` under Actions → the run → Artifacts.
 
-Or open the folder in Android Studio and press Run.
+## Adding a theme to the store
 
-## First launch
-
-Tap **Choose ROMs folder** and pick your ROMs folder. That's the only required step.
-Put games in subfolders named after the system (`GBA`, `SNES`, `PSP`, `Dreamcast`…); DuoDeck also recognises common file types.
-
-## Emulators
-
-DuoDeck launches whichever supported emulator is installed (RetroArch, Dolphin, PPSSPP, Azahar/Citra, melonDS, DuckStation, NetherSX2, Flycast, Redream…).
-Long-press a game to choose a different app. Launching is best-effort because every emulator accepts files a little differently; RetroArch uses a built-in core per system.
+Add an entry to `themes/index.json` (copy an existing one). Colours are `#RRGGBB` or `#AARRGGBB`.

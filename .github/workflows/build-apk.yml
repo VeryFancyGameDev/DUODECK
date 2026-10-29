@@ -17,7 +17,18 @@ jobs:
         with:
           gradle-version: 8.10.2
       - name: Build release APK
-        run: gradle :app:assembleRelease --no-daemon
+        shell: bash
+        run: gradle :app:assembleRelease --no-daemon --console=plain 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: Show compile errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          errs=$(grep -E '^e: ' build.log | sed -E 's#file://.*/launcher/##' | sed 's/%/%25/g' | head -60 | sed ':a;N;$!ba;s/\n/%0A/g')
+          if [ -n "$errs" ]; then echo "::error title=Kotlin compile errors::$errs"; fi
+          why=$(grep -A10 'What went wrong' build.log | head -24 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          if [ -n "$why" ]; then echo "::error title=Gradle::$why"; fi
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: DuoDeck-apk
