@@ -19,6 +19,7 @@ data class KnownEmu(
 object Emulators {
     const val RA_ACTIVITY = "com.retroarch.browser.retroactivity.RetroActivityFuture"
     const val DOLPHIN_ACTIVITY = "org.dolphinemu.dolphinemu.ui.main.MainActivity"
+    const val GAMENATIVE = "app.gamenative"
     private const val YUZU = "org.yuzu.yuzu_emu.activities.EmulationActivity"
 
     val all: List<KnownEmu> = listOf(
@@ -60,6 +61,26 @@ object Emulators {
         KnownEmu("org.sudachi.sudachi_emu", "Sudachi", "org.sudachi.sudachi_emu.activities.EmulationActivity"),
         KnownEmu("org.stratoemu.strato", "Strato", "emu.skyline.EmulationActivity"),
         KnownEmu("skyline.emu", "Skyline", "emu.skyline.EmulationActivity"),
+
+        // More handhelds / retro (package names best-effort; opens with a generic "view file" intent)
+        KnownEmu("com.swordfish.lemuroid", "Lemuroid"),
+        KnownEmu("org.mupen64plusae.v3.fzurita", "Mupen64Plus FZ"),
+        KnownEmu("org.mupen64plusae.v3.fzurita.pro", "Mupen64Plus FZ Pro"),
+        KnownEmu("com.explusalpha.Snes9xPlus", "Snes9x EX+"),
+        KnownEmu("com.explusalpha.GbaEmu", "John GBA"),
+        KnownEmu("com.explusalpha.GbcEmu", "John GBC"),
+        KnownEmu("com.explusalpha.NesEmu", "NES.emu"),
+        KnownEmu("com.explusalpha.MdEmu", "MD.emu"),
+        KnownEmu("it.dbtecno.pizzaboygbapro", "Pizza Boy GBA Pro"),
+        KnownEmu("it.dbtecno.pizzaboygba", "Pizza Boy GBA"),
+        KnownEmu("com.epsxe.ePSXe", "ePSXe"),
+        KnownEmu("org.devmiyax.yabasanshioro2", "Yaba Sanshiro 2"),
+        KnownEmu("org.devmiyax.yabasanshioro2.pro", "Yaba Sanshiro 2 Pro"),
+        KnownEmu("org.vita3k.emulator", "Vita3K"),
+
+        // PC / Steam
+        KnownEmu(GAMENATIVE, "GameNative"),
+        KnownEmu("com.winlator", "Winlator"),
     )
 
     val byPkg: Map<String, KnownEmu> = all.associateBy { it.pkg }

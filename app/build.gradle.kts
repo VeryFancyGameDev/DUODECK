@@ -12,14 +12,24 @@ android {
         applicationId = "com.duodeck.launcher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // CI passes the run number so every build is newer than the last (needed for in-app updates)
+        versionCode = (project.findProperty("duodeckBuild") as String?)?.toIntOrNull() ?: 1
+        versionName = "3.1"
+    }
+
+    signingConfigs {
+        // A fixed key (kept in the repo) so each new build installs over the old one without uninstalling.
+        create("duodeck") {
+            storeFile = rootProject.file("keystore/duodeck.jks")
+            storePassword = "duodeck-open"
+            keyAlias = "duodeck"
+            keyPassword = "duodeck-open"
+        }
     }
 
     buildTypes {
         release {
-            // Signed with the debug key so the APK installs with zero setup.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("duodeck")
             isMinifyEnabled = false
         }
     }

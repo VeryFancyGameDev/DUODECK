@@ -3,6 +3,9 @@ package com.duodeck.launcher
 import android.app.Presentation
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.Display
 import android.view.KeyEvent
@@ -24,6 +27,7 @@ import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.duodeck.launcher.data.LibraryLayout
 import com.duodeck.launcher.data.MusicManager
+import com.duodeck.launcher.data.Steps
 import com.duodeck.launcher.ui.*
 import kotlinx.coroutines.launch
 
@@ -32,6 +36,22 @@ class MainActivity : ComponentActivity() {
     private var presentation: SecondScreen? = null
     private var hasSecondDisplay by mutableStateOf(false)
     private lateinit var music: MusicManager
+
+    private val stepPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) vm.syncSteps()
+    }
+
+    private fun ensureSteps() {
+        if (!Steps.available(this)) return
+        val granted = Build.VERSION.SDK_INT < 29 ||
+            checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        if (granted) { vm.syncSteps(); return }
+        val sp = getSharedPreferences("duodeck", MODE_PRIVATE)
+        if (!sp.getBoolean("askedSteps", false)) {
+            sp.edit().putBoolean("askedSteps", true).apply()
+            stepPerm.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+    }
 
     private val displays by lazy { getSystemService(Context.DISPLAY_SERVICE) as DisplayManager }
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -54,8 +74,10 @@ class MainActivity : ComponentActivity() {
                 if (uri != null) vm.addRomFolder(uri)
             }
 
-            BackHandler(enabled = screen != Screen.HOME || tab.startsWith("group:")) {
-                if (screen != Screen.HOME) vm.back() else vm.tab.value = "groups"
+            BackHandler(enabled = screen != Screen.HOME || tab.startsWith("group:") || (tab.startsWith("sys:") && s.consoleFolders)) {
+                if (screen != Screen.HOME) vm.back()
+                else if (tab.startsWith("group:")) vm.tab.value = "groups"
+                else vm.tab.value = "consoles"
             }
 
             DuoTheme(s.theme, theme, s.wallpaper, s.wallpaperDim) {
@@ -69,9 +91,13 @@ class MainActivity : ComponentActivity() {
                         Screen.THEMES -> ThemeStoreScreen(vm, m)
                         Screen.AVATAR -> AvatarMakerScreen(vm, m)
                         Screen.EMULATORS -> EmulatorsScreen(vm, m)
+                        Screen.ARCADE -> ArcadeScreen(vm, m)
+                        Screen.DISCORD -> DiscordScreen(vm, m)
                     }
                 }
 
+                TiltProvider(s.tilt3d) {
+                Box(Modifier.fillMaxSize()) {
                 if (external || screen != Screen.HOME) {
                     Bottom(Modifier.fillMaxSize())
                 } else {
@@ -90,6 +116,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                UpdateBanner(vm, Modifier.align(androidx.compose.ui.Alignment.TopCenter))
+                }
+                }
                 DialogHost(vm)
             }
         }
@@ -99,6 +128,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStart() { super.onStart(); syncSecondScreen(); music.resume() }
+    override fun onResume() { super.onResume(); ensureSteps() }
     override fun onStop() { music.pause(); dismissSecondScreen(); super.onStop() }
     override fun onDestroy() {
         displays.unregisterDisplayListener(displayListener)
@@ -157,7 +187,7 @@ class MainActivity : ComponentActivity() {
             }
             KeyEvent.KEYCODE_BUTTON_START -> { vm.go(Screen.SETTINGS); true }
             KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1 -> {
-                val order = listOf("all", "fav", "recent", "groups", "apps") + vm.systemsPresent.value.map { "sys:${it.id}" }
+                val order = (if (vm.settings.value.consoleFolders) listOf("consoles") else emptyList()) + listOf("all", "fav", "recent", "groups", "apps") + vm.systemsPresent.value.map { "sys:${it.id}" }
                 val i = order.indexOf(vm.tab.value).coerceAtLeast(0)
                 val step = if (keyCode == KeyEvent.KEYCODE_BUTTON_R1) 1 else -1
                 vm.tab.value = order[(i + step + order.size) % order.size]

@@ -3,7 +3,10 @@ package com.duodeck.launcher.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -40,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.duodeck.launcher.*
+import com.duodeck.launcher.data.DiscordFeed
 import com.duodeck.launcher.data.LibraryLayout
 import kotlinx.coroutines.launch
 
@@ -65,18 +69,20 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
     val env = TileEnv(art, progress, user.favorites, byId, settings.showLabels)
 
     val onTile: (Tile) -> Unit = { t ->
-        if (settings.tapToLaunch || t is AddTile || t is GroupTile || t.key == selected?.key) vm.activate(t) else vm.select(t)
+        if (settings.tapToLaunch || t is AddTile || t is GroupTile || t is SysTile || t.key == selected?.key) vm.activate(t) else vm.select(t)
     }
     val onLong: (Tile) -> Unit = { vm.longPress(it) }
 
     val gameTab = tab == "all" || tab == "fav" || tab == "recent" || tab.startsWith("sys:") || tab.startsWith("group:")
-    val needsRoms = games.isEmpty() && settings.romsUris.isEmpty() && gameTab
+    val needsRoms = games.isEmpty() && settings.romsUris.isEmpty() && (gameTab || tab == "consoles")
     val inGroup = tab.startsWith("group:")
+    val inSys = tab.startsWith("sys:") && settings.consoleFolders
+    val discordUnread by DiscordFeed.unread.collectAsStateWithLifecycle()
 
     DotBackground(modifier) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             Dock(
-                tab = tab, layout = settings.layout, user = user,
+                tab = tab, consoles = settings.consoleFolders, layout = settings.layout, user = user,
                 onTab = { t ->
                     if (t == "all" && (tab == "all" || tab.startsWith("sys:"))) showSystems = !showSystems
                     vm.tab.value = t
@@ -91,6 +97,12 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
                 Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("‹ Groups", false, { vm.tab.value = "groups" })
                     Pill(g?.name ?: "Group", true, {}, tint = GroupColors[(g?.colorIdx ?: 0).coerceIn(0, GroupColors.lastIndex)].first)
+                }
+            } else if (inSys) {
+                val sys = com.duodeck.launcher.data.Systems.get(tab.removePrefix("sys:"))
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("‹ Consoles", false, { vm.tab.value = "consoles" })
+                    Pill(sys?.name ?: "Console", true, {}, tint = sys?.colorA ?: LocalDuo.current.accent)
                 }
             } else if (showSystems || tab.startsWith("sys:")) {
                 LazyRow(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 14.dp),
@@ -137,6 +149,11 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
                 }, size = 40.dp)
                 GlossyIcon(Icons.Filled.Casino, "Random game", { vm.randomGame() }, size = 40.dp)
                 GlossyIcon(Icons.Filled.Refresh, "Rescan library", { vm.rescan() }, active = scanning, size = 40.dp)
+                GlossyIcon(Icons.Filled.EmojiEvents, "Badge Arcade", { vm.go(Screen.ARCADE) }, size = 40.dp)
+                Box {
+                    GlossyIcon(Icons.Filled.Forum, "Discord", { vm.go(Screen.DISCORD) }, size = 40.dp)
+                    if (discordUnread > 0) Box(Modifier.align(Alignment.TopEnd).size(14.dp).clip(CircleShape).background(Color(0xFFFF5252)))
+                }
             }
         }
     }
@@ -146,7 +163,7 @@ fun BottomScreen(vm: LibraryViewModel, onPickFolder: () -> Unit, modifier: Modif
 
 @Composable
 private fun Dock(
-    tab: String, layout: LibraryLayout, user: com.duodeck.launcher.data.UserState,
+    tab: String, consoles: Boolean, layout: LibraryLayout, user: com.duodeck.launcher.data.UserState,
     onTab: (String) -> Unit, onSettings: () -> Unit, onLayout: () -> Unit, onAvatar: () -> Unit,
 ) {
     val duo = LocalDuo.current
@@ -158,7 +175,8 @@ private fun Dock(
             contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.Settings, "Settings", tint = duo.accent, modifier = Modifier.size(30.dp))
         }
-        val items = listOf(
+        val items = listOfNotNull(
+            if (consoles) Triple("consoles", Icons.Filled.VideogameAsset, Color(0xFFE53935)) else null,
             Triple("all", Icons.Filled.SportsEsports, Color(0xFFFF8F00)),
             Triple("fav", Icons.Filled.Star, Color(0xFFFFB300)),
             Triple("recent", Icons.Filled.History, Color(0xFF00BFA5)),
@@ -167,7 +185,7 @@ private fun Dock(
         )
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             items.forEach { (key, icon, tint) ->
-                val on = tab == key || (key == "all" && tab.startsWith("sys:")) || (key == "groups" && tab.startsWith("group:"))
+                val on = tab == key || (key == (if (consoles) "consoles" else "all") && tab.startsWith("sys:")) || (key == "groups" && tab.startsWith("group:"))
                 DockIcon(icon, tint, on) { onTab(key) }
             }
         }
@@ -190,13 +208,14 @@ private fun Dock(
 private fun DockIcon(icon: ImageVector, tint: Color, on: Boolean, onClick: () -> Unit) {
     val duo = LocalDuo.current
     val lift by animateFloatAsState(if (on) 1.12f else 1f, label = "dock")
-    Box(Modifier.size(44.dp).scale(lift).bounceClick(onClick = onClick).clip(RoundedCornerShape(14.dp))
+    Box(Modifier.size(40.dp).scale(lift).bounceClick(onClick = onClick).clip(RoundedCornerShape(14.dp))
         .background(if (on) duo.surface else Color.Transparent), contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(30.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
     }
 }
 
 private fun emptyMessage(tab: String, noGames: Boolean): String = when {
+    tab == "consoles" -> "No games yet.\nPick your ROM folder in Settings, or sync Steam."
     tab == "fav" -> "No favourites yet.\nLong-press a game and choose Favourite."
     tab == "recent" -> "Games you play will show up here."
     tab.startsWith("group:") -> "This group is empty.\nLong-press a game and choose Add to group."
@@ -258,16 +277,34 @@ private fun PagesView(
                 }
             }
             if (pages.size > 1) {
-                Row(Modifier.fillMaxWidth().height(dotsH), horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    for (i in pages.indices) {
-                        val on = i == pager.currentPage
-                        Box(Modifier.padding(horizontal = 4.dp).size(if (on) 9.dp else 7.dp).clip(CircleShape)
-                            .background(if (on) duo.accent else duo.muted.copy(alpha = 0.4f))
-                            .bounceClick { scope.launch { pager.animateScrollToPage(i) } })
-                    }
+                PageScrubBar(pager, pages.size, Modifier.height(dotsH)) { i, animate ->
+                    scope.launch { if (animate) pager.animateScrollToPage(i) else pager.scrollToPage(i) }
                 }
             } else Spacer(Modifier.height(dotsH))
+        }
+    }
+}
+
+/** iiSU-style page bar: a slim track with a thumb that slides as you swipe; tap or drag it to jump pages. */
+@Composable
+private fun PageScrubBar(pager: PagerState, count: Int, modifier: Modifier, onGo: (Int, Boolean) -> Unit) {
+    val duo = LocalDuo.current
+    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
+        val trackW = maxWidth
+        val thumbW = (trackW / count).coerceAtLeast(40.dp)
+        val progress = ((pager.currentPage + pager.currentPageOffsetFraction) / (count - 1).coerceAtLeast(1)).coerceIn(0f, 1f)
+        Box(Modifier.fillMaxSize()
+            .pointerInput(count) { detectTapGestures { o -> onGo(((o.x / size.width) * count).toInt().coerceIn(0, count - 1), true) } }
+            .pointerInput(count) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    val i = ((change.position.x / size.width) * count).toInt().coerceIn(0, count - 1)
+                    if (i != pager.currentPage) onGo(i, false)
+                }
+            }, contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(PillShape).background(duo.muted.copy(alpha = 0.25f)))
+            Box(Modifier.offset(x = (trackW - thumbW) * progress).width(thumbW).height(10.dp).clip(PillShape)
+                .background(Brush.horizontalGradient(listOf(duo.accent2, duo.accent))))
         }
     }
 }

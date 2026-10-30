@@ -17,9 +17,38 @@ object Launcher {
     fun isInstalled(ctx: Context, pkg: String): Boolean =
         ctx.packageManager.getLaunchIntentForPackage(pkg) != null
 
-    /** Known emulators for [system] that are actually installed. */
+    private var labelCache: List<Pair<String, String>> = emptyList()
+    private var labelCacheAt = 0L
+
+    /** (package, label) of every launchable app, cached for a minute. */
+    private fun appLabels(ctx: Context): List<Pair<String, String>> {
+        val now = System.currentTimeMillis()
+        if (now - labelCacheAt > 60_000 || labelCache.isEmpty()) {
+            val pm = ctx.packageManager
+            labelCache = runCatching {
+                pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                    .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+                    .distinctBy { it.first }
+            }.getOrDefault(emptyList())
+            labelCacheAt = now
+        }
+        return labelCache
+    }
+
+    /** Installed apps whose name contains one of the system's hint words (e.g. "watermelon", "gamehub"). */
+    fun hinted(ctx: Context, system: GameSystem): List<KnownEmu> {
+        if (system.labelHints.isEmpty()) return emptyList()
+        return appLabels(ctx).filter { (pkg, label) ->
+            val l = label.lowercase()
+            val words = l.split(' ', '-', '_', '.')
+            pkg != ctx.packageName && system.labelHints.any { h -> if (' ' in h) l.contains(h) else words.any { it.startsWith(h) } }
+        }.map { (pkg, label) -> Emulators.byPkg[pkg] ?: KnownEmu(pkg, label) }
+    }
+
+    /** Known emulators for [system] that are actually installed, plus apps found by name. */
     fun candidates(ctx: Context, system: GameSystem): List<KnownEmu> =
-        system.emulators.mapNotNull { Emulators.byPkg[it] }.filter { isInstalled(ctx, it.pkg) }
+        (system.emulators.mapNotNull { Emulators.byPkg[it] }.filter { isInstalled(ctx, it.pkg) } + hinted(ctx, system))
+            .distinctBy { it.pkg }
 
     fun installed(ctx: Context, system: GameSystem): String? = candidates(ctx, system).firstOrNull()?.pkg
 
@@ -27,13 +56,14 @@ object Launcher {
         val system = Systems.get(systemId)
         val profile = (gameId?.let { user.profiles["game:$it"] }) ?: user.profiles[systemId] ?: LaunchProfile()
         val pkg = profile.pkg?.takeIf { isInstalled(ctx, it) } ?: system?.let { installed(ctx, it) }
-        val known = pkg?.let { Emulators.byPkg[it] }
+        val known = pkg?.let { p -> Emulators.byPkg[p] ?: system?.let { s -> hinted(ctx, s).firstOrNull { it.pkg == p } } }
         val mode = if (profile.mode != LaunchMode.AUTO) profile.mode else known?.mode ?: LaunchMode.VIEW_URI
         val core = profile.core ?: Emulators.coresFor(systemId).firstOrNull()
         return Resolved(pkg, known, mode, core)
     }
 
     fun launchGame(ctx: Context, game: Game, user: UserState, forceChooser: Boolean = false) {
+        if (game.systemId == "pc") { launchPc(ctx, game, user); return }
         val r = resolve(ctx, game.systemId, game.id, user)
         val uri = Uri.parse(game.uri)
 
@@ -57,6 +87,25 @@ object Launcher {
             ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             toast(ctx, "Opened ${r.known?.label ?: r.pkg}, but it wouldn't take the game. Try another launch style in Settings → Emulators.")
         } ?: toast(ctx, "Couldn't start the emulator")
+    }
+
+    /**
+     * Steam games. GameNative has a documented launch action (app.gamenative.LAUNCH_GAME + app_id), so those
+     * start straight into the game. Other launchers (GameHub, Winlator, Droid Deck…) have no public intent
+     * we can rely on, so we open the app and tell you which game to start.
+     */
+    private fun launchPc(ctx: Context, game: Game, user: UserState) {
+        val appId = game.uri.removePrefix("steam://").toIntOrNull()
+        val r = resolve(ctx, "pc", game.id, user)
+        val pkg = r.pkg
+        if (pkg == null) { toast(ctx, "Install GameNative, GameHub or Winlator to play PC games"); return }
+        if (pkg == Emulators.GAMENATIVE && appId != null && appId > 0) {
+            val i = Intent("app.gamenative.LAUNCH_GAME").setPackage(pkg)
+                .putExtra("app_id", appId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { ctx.startActivity(i) }.isSuccess) return
+        }
+        launchApp(ctx, pkg)
+        toast(ctx, "Opened ${r.known?.label ?: pkg}. Start “${game.title}” from there.")
     }
 
     fun launchApp(ctx: Context, pkg: String) {

@@ -26,7 +26,9 @@ fun EmulatorsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
     val user by vm.user.collectAsStateWithLifecycle()
     val present by vm.systemsPresent.collectAsStateWithLifecycle()
     val systems = if (present.isEmpty()) Systems.all else present
-    val installed = remember { Emulators.all.filter { Launcher.isInstalled(ctx, it.pkg) } }
+    val installed = remember {
+        (Emulators.all.filter { Launcher.isInstalled(ctx, it.pkg) } + Systems.all.flatMap { Launcher.hinted(ctx, it) }).distinctBy { it.pkg }
+    }
 
     DotBackground(modifier) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {

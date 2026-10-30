@@ -14,12 +14,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { HOME, SETTINGS, THEMES, AVATAR, EMULATORS }
+enum class Screen { HOME, SETTINGS, THEMES, AVATAR, EMULATORS, ARCADE, DISCORD }
 
 sealed interface Tile { val key: String }
 data class GameTile(val game: Game) : Tile { override val key: String get() = "g:${game.id}" }
 data class GroupTile(val group: Group) : Tile { override val key: String get() = "grp:${group.id}" }
 data class AppTile(val app: AppEntry) : Tile { override val key: String get() = "app:${app.pkg}" }
+data class SysTile(val system: GameSystem, val count: Int, val sample: List<Game>) : Tile { override val key: String get() = "sys:${system.id}" }
 data class AddTile(val kind: String) : Tile { override val key: String get() = "add:$kind" }
 
 sealed interface Dlg {
@@ -53,12 +54,18 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ library
     private val _games = MutableStateFlow(RomScanner.loadCache(app))
-    val games: StateFlow<List<Game>> = _games
+    private val steamList = _user.map { it.steam }.distinctUntilChanged()
+    /** ROMs from your folders plus your synced Steam library. */
+    val games: StateFlow<List<Game>> =
+        combine(_games, steamList) { g, st -> g + st.map { SteamLib.toGame(it) } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, _games.value)
 
     private val autoArt = MutableStateFlow<Map<String, String>>(emptyMap())
-    /** Custom picks win over automatic SteamGridDB covers. */
+    private val steamArt = steamList.map { l -> l.associate { "steam:${it.appId}" to SteamLib.art(it.appId) } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    /** Custom picks win over automatic SteamGridDB covers, which win over Steam's own capsule art. */
     val art: StateFlow<Map<String, String>> =
-        combine(autoArt, _user) { a, u -> a + u.customArt }
+        combine(autoArt, _user, steamArt) { a, u, st -> st + a + u.customArt }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private val _scanning = MutableStateFlow(false)
@@ -84,8 +91,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun show(d: Dlg?) { dialog.value = d }
 
     // ------------------------------------------------------------ tabs, search, tiles
-    /** all | fav | recent | groups | apps | sys:<id> | group:<id> */
-    val tab = MutableStateFlow("all")
+    /** consoles | all | fav | recent | groups | apps | sys:<id> | group:<id> */
+    val tab = MutableStateFlow("consoles")
     val query = MutableStateFlow("")
     val selectedKey = MutableStateFlow<String?>(null)
 
@@ -111,6 +118,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             list.filter { ok(it.title) && (!s.hideNoArt || i.art.containsKey(it.id)) }.map { GameTile(it) }
         val t = i.tab
         return when {
+            t == "consoles" && s.consoleFolders && q.isEmpty() -> {
+                val by = i.games.groupBy { it.systemId }
+                Systems.all.filter { by.containsKey(it.id) }.map { SysTile(it, by[it.id]!!.size, by[it.id]!!.take(8)) }
+            }
             t == "groups" -> i.user.groups.filter { ok(it.name) }.map { GroupTile(it) } + AddTile("group")
             t == "apps" -> i.user.apps.filter { ok(it.label) }.map { AppTile(it) } + AddTile("app")
             t == "fav" -> gameTiles(i.user.favorites.mapNotNull { byId[it] }.sortedBy { it.title.lowercase() })
@@ -144,6 +155,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         when (t) {
             is GameTile -> launchGame(t.game)
             is GroupTile -> { tab.value = "group:${t.group.id}"; selectedKey.value = null }
+            is SysTile -> { tab.value = "sys:${t.system.id}"; selectedKey.value = null }
             is AppTile -> Launcher.launchApp(ctx, t.app.pkg)
             is AddTile -> show(if (t.kind == "group") Dlg.NewGroup() else Dlg.AddApp)
         }
@@ -154,6 +166,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             is GameTile -> show(Dlg.GameMenu(t.game))
             is GroupTile -> show(Dlg.GroupMenu(t.group))
             is AppTile -> show(Dlg.AppMenu(t.app))
+            is SysTile -> show(Dlg.EmuProfile(t.system.id, t.system.id, t.system.name))
             is AddTile -> Unit
         }
     }
@@ -242,9 +255,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         artJob?.cancel()
         val key = settings.value.sgdbKey
         artJob = viewModelScope.launch {
-            autoArt.value = _games.value.mapNotNull { g -> sgdb.cached(g)?.let { g.id to it } }.toMap()
+            autoArt.value = games.value.mapNotNull { g -> sgdb.cached(g)?.let { g.id to it } }.toMap()
             if (key.isBlank()) return@launch
-            val ordered = (tiles.value.filterIsInstance<GameTile>().map { it.game } + _games.value).distinctBy { it.id }
+            val ordered = (tiles.value.filterIsInstance<GameTile>().map { it.game } + games.value).distinctBy { it.id }
             for (g in ordered) {
                 if (sgdb.hasLookedUp(g) || _user.value.customArt.containsKey(g.id)) continue
                 sgdb.fetchCover(g, key)?.let { url -> autoArt.update { it + (g.id to url) } }
@@ -363,6 +376,113 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         return list.size
     }
 
+
+    // ------------------------------------------------------------ step coins
+    /** Converts steps walked since the last check into Play Coins (100 steps = 1 coin, 10 coins a day). */
+    fun syncSteps() {
+        viewModelScope.launch {
+            val c = Steps.read(ctx) ?: return@launch
+            var earned = 0
+            updateUser { u ->
+                val day = today()
+                val sameDay = u.stepDay == day
+                val delta = when {
+                    u.stepBase < 0 -> 0L
+                    c >= u.stepBase -> c - u.stepBase
+                    else -> c // phone rebooted: counter restarted from zero
+                }.coerceAtMost(200_000L).toInt()
+                val coinsDone = if (sameDay) u.stepCoinsToday else 0
+                val carry = u.stepCarry + delta
+                val whole = carry / Steps.STEPS_PER_COIN
+                val room = (Steps.DAILY_CAP - coinsDone).coerceAtLeast(0)
+                val walletRoom = (300 - u.coins).coerceAtLeast(0)
+                earned = minOf(whole, room, walletRoom)
+                u.copy(
+                    stepBase = c, stepDay = day,
+                    stepsToday = (if (sameDay) u.stepsToday else 0) + delta,
+                    totalSteps = u.totalSteps + delta,
+                    stepCoinsToday = coinsDone + earned,
+                    // keep the leftover steps; once the daily cap is hit, extra steps simply don't bank
+                    stepCarry = if (coinsDone + earned >= Steps.DAILY_CAP) 0 else carry - whole * Steps.STEPS_PER_COIN,
+                    coins = u.coins + earned,
+                )
+            }
+            if (earned > 0) Toast.makeText(ctx, "+$earned Play Coin${if (earned == 1) "" else "s"} from walking!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ------------------------------------------------------------ badge arcade
+    /** Pays for one claw try. False if you can't afford it. */
+    fun payClaw(): Boolean {
+        if (_user.value.coins < Badges.CLAW_COST) return false
+        updateUser { it.copy(coins = it.coins - Badges.CLAW_COST, clawPlays = it.clawPlays + 1) }
+        return true
+    }
+
+    fun addBadge(id: String) = updateUser { it.copy(badges = it.badges + (id to ((it.badges[id] ?: 0) + 1))) }
+
+    fun togglePin(id: String) = updateUser {
+        it.copy(pins = if (id in it.pins) it.pins - id else (it.pins + id).takeLast(5))
+    }
+
+    /** Duplicates can be swapped back into Play Coins. */
+    fun sellDuplicate(id: String) = updateUser {
+        val n = it.badges[id] ?: 0
+        if (n < 2) it
+        else it.copy(badges = it.badges + (id to n - 1),
+            coins = (it.coins + (Badges.byId[id]?.rarity?.ordinal ?: 0) + 1).coerceAtMost(300))
+    }
+
+    // ------------------------------------------------------------ steam
+    val steamStatus = MutableStateFlow("")
+
+    fun syncSteam() {
+        val s = settings.value
+        viewModelScope.launch {
+            if (s.steamId.isBlank() || s.steamKey.isBlank()) { steamStatus.value = "Enter your SteamID64 and API key first."; return@launch }
+            steamStatus.value = "Syncing…"
+            SteamLib.owned(s.steamId, s.steamKey)
+                .onSuccess { l -> updateUser { it.copy(steam = l) }; steamStatus.value = "${l.size} Steam games synced"; fetchArt() }
+                .onFailure { steamStatus.value = it.message ?: "Couldn't reach Steam" }
+        }
+    }
+
+    fun clearSteam() { updateUser { it.copy(steam = emptyList()) }; steamStatus.value = "" }
+
+    // ------------------------------------------------------------ updates
+    val update = MutableStateFlow<UpdateInfo?>(null)
+    val updateStatus = MutableStateFlow("")
+    val updateProgress = MutableStateFlow(-1f)
+
+    fun checkUpdate(manual: Boolean = false) {
+        viewModelScope.launch {
+            if (manual) updateStatus.value = "Checking…"
+            val info = Updater.latest()
+            when {
+                info == null -> if (manual) updateStatus.value = "Couldn't reach the update server."
+                info.build > Updater.installedBuild(ctx) -> { update.value = info; updateStatus.value = "Update available: ${info.name}" }
+                else -> { update.value = null; if (manual) updateStatus.value = "You're on the latest version." }
+            }
+        }
+    }
+
+    fun installUpdate() {
+        val info = update.value ?: return
+        if (!Updater.canInstall(ctx)) {
+            updateStatus.value = "Allow DuoDeck to install apps, then tap Update again."
+            Updater.openInstallPermission(ctx); return
+        }
+        viewModelScope.launch {
+            updateProgress.value = 0f
+            updateStatus.value = "Downloading…"
+            val f = Updater.download(ctx, info) { updateProgress.value = it }
+            updateProgress.value = -1f
+            if (f == null) { updateStatus.value = "Download failed. Try again."; return@launch }
+            updateStatus.value = "Ready to install"
+            Updater.install(ctx, f)
+        }
+    }
+
     // ------------------------------------------------------------ RetroAchievements
     private val _profile = MutableStateFlow<RaProfile?>(null)
     val profile: StateFlow<RaProfile?> = _profile
@@ -386,6 +506,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        DiscordFeed.load(app)
+        viewModelScope.launch {
+            // one quiet update check shortly after launch
+            kotlinx.coroutines.delay(2500)
+            if (settings.value.autoUpdateCheck) checkUpdate()
+        }
         // Rescan whenever the ROM folder list changes.
         viewModelScope.launch {
             var first = true

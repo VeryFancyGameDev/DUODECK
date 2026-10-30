@@ -33,6 +33,11 @@ data class Settings(
     val wallpaper: String? = null,
     val wallpaperDim: Float = 0.35f,
     val sort: SortMode = SortMode.NAME,
+    val consoleFolders: Boolean = true,
+    val tilt3d: Boolean = true,
+    val steamId: String = "",
+    val steamKey: String = "",
+    val autoUpdateCheck: Boolean = true,
 )
 
 class Prefs(private val ctx: Context) {
@@ -56,6 +61,11 @@ class Prefs(private val ctx: Context) {
         val wallpaper = stringPreferencesKey("wallpaper")
         val wallDim = floatPreferencesKey("wall_dim")
         val sort = stringPreferencesKey("sort")
+        val consoleFolders = booleanPreferencesKey("console_folders")
+        val tilt3d = booleanPreferencesKey("tilt3d")
+        val steamId = stringPreferencesKey("steam_id")
+        val steamKey = stringPreferencesKey("steam_key")
+        val autoUpd = booleanPreferencesKey("auto_update")
     }
 
     val flow: Flow<Settings> = ctx.store.data.map { it.toSettings() }
@@ -80,6 +90,11 @@ class Prefs(private val ctx: Context) {
         wallpaper = this[K.wallpaper],
         wallpaperDim = this[K.wallDim] ?: 0.35f,
         sort = runCatching { SortMode.valueOf(this[K.sort] ?: "NAME") }.getOrDefault(SortMode.NAME),
+        consoleFolders = this[K.consoleFolders] ?: true,
+        tilt3d = this[K.tilt3d] ?: true,
+        steamId = this[K.steamId] ?: "",
+        steamKey = this[K.steamKey] ?: "",
+        autoUpdateCheck = this[K.autoUpd] ?: true,
     )
 
     suspend fun setRoms(list: List<String>) = ctx.store.edit { it[K.roms] = list.joinToString("\n") }
@@ -100,4 +115,8 @@ class Prefs(private val ctx: Context) {
     suspend fun setWallpaper(v: String?) = ctx.store.edit { if (v == null) it.remove(K.wallpaper) else it[K.wallpaper] = v }
     suspend fun setWallpaperDim(v: Float) = ctx.store.edit { it[K.wallDim] = v.coerceIn(0f, 0.9f) }
     suspend fun setSort(v: SortMode) = ctx.store.edit { it[K.sort] = v.name }
+    suspend fun setConsoleFolders(v: Boolean) = ctx.store.edit { it[K.consoleFolders] = v }
+    suspend fun setTilt3d(v: Boolean) = ctx.store.edit { it[K.tilt3d] = v }
+    suspend fun setSteam(id: String, key: String) = ctx.store.edit { it[K.steamId] = id.trim(); it[K.steamKey] = key.trim() }
+    suspend fun setAutoUpdate(v: Boolean) = ctx.store.edit { it[K.autoUpd] = v }
 }

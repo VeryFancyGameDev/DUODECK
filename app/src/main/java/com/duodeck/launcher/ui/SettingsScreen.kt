@@ -25,6 +25,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import android.Manifest
+import android.os.Build
+import com.duodeck.launcher.data.DiscordFeed
+import com.duodeck.launcher.data.Steps
+import com.duodeck.launcher.data.Updater
 import com.duodeck.launcher.data.SortMode
 import com.duodeck.launcher.LibraryViewModel
 import com.duodeck.launcher.Screen
@@ -67,6 +72,16 @@ fun SettingsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
     val games by vm.games.collectAsStateWithLifecycle()
     val theme by vm.activeTheme.collectAsStateWithLifecycle()
     val scope = vm.viewModelScope
+
+    val user by vm.user.collectAsStateWithLifecycle()
+    val steamStatus by vm.steamStatus.collectAsStateWithLifecycle()
+    val upd by vm.update.collectAsStateWithLifecycle()
+    val updStatus by vm.updateStatus.collectAsStateWithLifecycle()
+    var steamId by remember(s.steamId) { mutableStateOf(s.steamId) }
+    var steamKey by remember(s.steamKey) { mutableStateOf(s.steamKey) }
+    val stepPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.syncSteps() }
+    val stepOk = Build.VERSION.SDK_INT < 29 ||
+        androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACTIVITY_RECOGNITION) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     var raUser by remember(s.raUser) { mutableStateOf(s.raUser) }
     var raKey by remember(s.raKey) { mutableStateOf(s.raKey) }
@@ -135,6 +150,12 @@ fun SettingsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                         Pill("A–Z", s.sort == SortMode.NAME, { scope.launch { vm.prefs.setSort(SortMode.NAME) } })
                         Pill("Recent", s.sort == SortMode.RECENT, { scope.launch { vm.prefs.setSort(SortMode.RECENT) } })
                         Pill("Most played", s.sort == SortMode.MOST_PLAYED, { scope.launch { vm.prefs.setSort(SortMode.MOST_PLAYED) } })
+                    }
+                    ToggleRow("Console folders", "Adds a Consoles tab that groups your games by system, like iiSU.", s.consoleFolders) {
+                        scope.launch { vm.prefs.setConsoleFolders(it) }
+                    }
+                    ToggleRow("3D tilt tiles", "Tiles have real thickness and shift as you tilt your phone.", s.tilt3d) {
+                        scope.launch { vm.prefs.setTilt3d(it) }
                     }
                     ToggleRow("Show names under tiles", "", s.showLabels) { scope.launch { vm.prefs.setLabels(it) } }
                     ToggleRow("Tap once to launch", "Off: first tap selects and previews, second tap launches.", s.tapToLaunch) {
@@ -227,6 +248,67 @@ fun SettingsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                         Pill("Avatar maker", true, { vm.go(Screen.AVATAR) })
                         Pill("Emulators & cores", true, { vm.go(Screen.EMULATORS) })
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Badge Arcade", false, { vm.go(Screen.ARCADE) })
+                        Pill("Discord", false, { vm.go(Screen.DISCORD) })
+                    }
+                }
+
+                SectionLabel("Play Coins from steps")
+                DuoCard {
+                    Text("Walk with your phone and earn Play Coins: 100 steps = 1 coin, up to ${Steps.DAILY_CAP} a day.",
+                        color = duo.muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    if (!Steps.available(ctx)) {
+                        Text("This device has no step counter sensor.", color = duo.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Text("Today: ${user.stepsToday} steps · ${user.stepCoinsToday}/${Steps.DAILY_CAP} coins", color = duo.text, fontWeight = FontWeight.Bold)
+                        Text("Total: ${user.totalSteps} steps", color = duo.muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(6.dp))
+                        if (!stepOk) Pill("Allow step counting", true, { stepPerm.launch(Manifest.permission.ACTIVITY_RECOGNITION) })
+                        else Pill("Count my steps now", false, { vm.syncSteps() })
+                        Text("Steps are added up whenever you open DuoDeck, even if you walked while it was closed.",
+                            color = duo.muted, fontSize = 11.sp)
+                    }
+                }
+
+                SectionLabel("Steam library")
+                DuoCard {
+                    Text("Shows your Steam games as PC tiles. Games open in GameNative (straight into the game) or in GameHub / Winlator / Droid Deck (opens the app). Needs your SteamID64 and a free Web API key from steamcommunity.com/dev/apikey, and your game list must be public.",
+                        color = duo.muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    DuoField(steamId, { steamId = it }, "SteamID64 (17 digits)")
+                    Spacer(Modifier.height(8.dp))
+                    DuoField(steamKey, { steamKey = it }, "Steam Web API key", secret = true)
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Save & sync", true, { scope.launch { vm.prefs.setSteam(steamId, steamKey); vm.syncSteam() } })
+                        if (user.steam.isNotEmpty()) Pill("Remove", false, { vm.clearSteam() })
+                    }
+                    val msg = steamStatus.ifBlank { if (user.steam.isNotEmpty()) "${user.steam.size} Steam games" else "" }
+                    if (msg.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(msg, color = duo.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                SectionLabel("Updates")
+                DuoCard {
+                    Text("Installed: ${Updater.installedName(ctx)} (build ${Updater.installedBuild(ctx)})", color = duo.text, fontWeight = FontWeight.Bold)
+                    Text("DuoDeck updates itself from GitHub, so you never need to download the file again.", color = duo.muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Check for updates", upd == null, { vm.checkUpdate(true) })
+                        if (upd != null) Pill("Update now", true, { vm.installUpdate() })
+                    }
+                    if (updStatus.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(updStatus, color = duo.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    ToggleRow("Check automatically", "Looks for a new version each time you open DuoDeck.", s.autoUpdateCheck) {
+                        scope.launch { vm.prefs.setAutoUpdate(it) }
+                    }
                 }
 
                 SectionLabel("RetroAchievements")
@@ -266,7 +348,7 @@ fun SettingsScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
 
                 SectionLabel("About")
                 DuoCard {
-                    Text("DuoDeck 2.0", color = duo.text, fontWeight = FontWeight.ExtraBold)
+                    Text("DuoDeck ${Updater.installedName(ctx)}", color = duo.text, fontWeight = FontWeight.ExtraBold)
                     Text("To use DuoDeck as your home screen, choose it under Android Settings → Apps → Default apps → Home app.",
                         color = duo.muted, fontSize = 12.sp)
                 }

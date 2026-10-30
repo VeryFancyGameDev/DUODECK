@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.duodeck.launcher.*
+import com.duodeck.launcher.data.Badges
+import com.duodeck.launcher.data.DiscordFeed
 import com.duodeck.launcher.data.Emulators
 import com.duodeck.launcher.data.Launcher
 import com.duodeck.launcher.data.RetroAchievements
@@ -63,10 +65,21 @@ fun TopScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
     val cur = tiles.indexOfFirst { it.key == tile?.key }.coerceAtLeast(0)
     val today = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
     val coinsToday = if (user.coinDay == today) user.coinsToday.coerceAtMost(10) else 0
+    val discordMsgs by DiscordFeed.msgs.collectAsStateWithLifecycle()
+    val discordUnread by DiscordFeed.unread.collectAsStateWithLifecycle()
 
     DotBackground(modifier) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp)) {
             HomeStatusBar(user.coins, Modifier.fillMaxWidth())
+            discordMsgs.firstOrNull()?.takeIf { discordUnread > 0 }?.let { m ->
+                Row(Modifier.padding(top = 4.dp).clip(PillShape).background(Color(0xFF5865F2).copy(alpha = 0.92f))
+                    .bounceClick { vm.go(Screen.DISCORD) }.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("💬 ${m.author}: ${m.text}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (discordUnread > 1) Text("  +${discordUnread - 1}", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+                }
+            }
 
             // ---- cube row ----
             BoxWithConstraints(Modifier.weight(1.1f).fillMaxWidth()) {
@@ -136,6 +149,12 @@ fun TopScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                             Spacer(Modifier.height(6.dp))
                             PlayButton("OPEN") { vm.activate(t) }
                         }
+                        is SysTile -> {
+                            Text(t.system.name, color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, maxLines = 1)
+                            Text("${t.count} game${if (t.count == 1) "" else "s"}", color = duo.muted, fontSize = 12.sp)
+                            Spacer(Modifier.height(6.dp))
+                            PlayButton("OPEN") { vm.activate(t) }
+                        }
                         is AppTile -> {
                             Text(t.app.label, color = duo.text, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, maxLines = 1)
                             Text("App", color = duo.muted, fontSize = 12.sp)
@@ -155,7 +174,8 @@ fun TopScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
                 Hint("Y", "Layout") { vm.cycleLayout() }
                 Hint("X", "Menu") { tile?.let { vm.longPress(it) } }
                 Spacer(Modifier.weight(1f))
-                Text("Coins today $coinsToday/10", color = duo.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                user.pins.mapNotNull { Badges.byId[it] }.forEach { BadgeMedallion(it, 22.dp); Spacer(Modifier.width(3.dp)) }
+                Text("👣 ${user.stepsToday} · Coins $coinsToday/10", color = duo.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -166,6 +186,7 @@ fun TopScreen(vm: LibraryViewModel, modifier: Modifier = Modifier) {
 private fun HomeCube(tile: Tile, offset: Int, size: Dp, env: TileEnv, onClick: () -> Unit) {
     val duo = LocalDuo.current
     val shape = RoundedCornerShape(size * 0.18f)
+    val (edgeA, edgeB) = tileColors(tile, duo)
     val bob = if (offset == 0) {
         val t = rememberInfiniteTransition(label = "bob")
         val v by t.animateFloat(-4f, 4f, infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b")
@@ -181,8 +202,9 @@ private fun HomeCube(tile: Tile, offset: Int, size: Dp, env: TileEnv, onClick: (
         // the cube's visible side, offset away from the viewer
         val side = if (offset >= 0) 7.dp else (-7).dp
         Box(Modifier.matchParentSize().offset(x = side).clip(shape)
-            .background(Brush.horizontalGradient(listOf(duo.surfaceHigh, duo.muted.copy(alpha = 0.45f)))))
-        Box(Modifier.matchParentSize().shadow(6.dp, shape).clip(shape).background(duo.surface).padding(size * 0.07f)) {
+            .background(Brush.horizontalGradient(listOf(edgeA.copy(alpha = 0.55f), edgeB.copy(alpha = 0.9f)))))
+        Box(Modifier.matchParentSize().shadow(6.dp, shape).clip(shape).background(duo.surface)
+            .border(3.dp, Brush.linearGradient(listOf(edgeA, edgeB)), shape).padding(size * 0.07f)) {
             when (tile) {
                 is GameTile -> Cover(tile.game, env.art[tile.game.id], Modifier.matchParentSize(), corner = size * 0.10f, showSystem = false)
                 is GroupTile -> {
@@ -191,6 +213,10 @@ private fun HomeCube(tile: Tile, offset: Int, size: Dp, env: TileEnv, onClick: (
                         .background(Brush.linearGradient(listOf(a, b))), contentAlignment = Alignment.Center) {
                         Text("📁", fontSize = (size.value * 0.4f).sp)
                     }
+                }
+                is SysTile -> Box(Modifier.matchParentSize().clip(RoundedCornerShape(size * 0.10f))
+                    .background(Brush.linearGradient(listOf(tile.system.colorA, tile.system.colorB))), contentAlignment = Alignment.Center) {
+                    Text(tile.system.short, color = Color.White, fontSize = (size.value * 0.26f).sp, fontWeight = FontWeight.ExtraBold)
                 }
                 is AppTile -> AppIcon(tile.app.pkg, Modifier.matchParentSize())
                 is AddTile -> Box(Modifier.matchParentSize().clip(RoundedCornerShape(size * 0.10f)).background(duo.surfaceHigh),

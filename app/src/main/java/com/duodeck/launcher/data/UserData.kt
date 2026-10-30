@@ -58,6 +58,13 @@ object UserStore {
             customArt = art, profiles = profiles,
             avatar = o.optJSONObject("avatar")?.let(::avatarFrom) ?: Avatar(),
             themes = themes,
+            stepBase = o.optLong("stepBase", -1L), stepCarry = o.optInt("stepCarry"), stepsToday = o.optInt("stepsToday"),
+            stepCoinsToday = o.optInt("stepCoinsToday"), stepDay = o.optString("stepDay"), totalSteps = o.optLong("totalSteps"),
+            badges = o.optJSONObject("badges")?.let { j -> j.keys().asSequence().associateWith { j.optInt(it) } }.orEmpty(),
+            pins = strings(o.optJSONArray("pins")), clawPlays = o.optInt("clawPlays"),
+            steam = o.optJSONArray("steam")?.let { a ->
+                (0 until a.length()).map { SteamGame(a.getJSONObject(it).getInt("id"), a.getJSONObject(it).getString("n")) }
+            }.orEmpty(),
         )
     }
 
@@ -84,6 +91,11 @@ object UserStore {
         })
         put("avatar", avatarJson(s.avatar))
         put("themes", JSONArray().apply { s.themes.forEach { put(it.toJson()) } })
+        put("stepBase", s.stepBase); put("stepCarry", s.stepCarry); put("stepsToday", s.stepsToday)
+        put("stepCoinsToday", s.stepCoinsToday); put("stepDay", s.stepDay); put("totalSteps", s.totalSteps)
+        put("badges", JSONObject().apply { s.badges.forEach { (k, v) -> put(k, v) } })
+        put("pins", JSONArray(s.pins)); put("clawPlays", s.clawPlays)
+        put("steam", JSONArray().apply { s.steam.forEach { put(JSONObject().put("id", it.appId).put("n", it.name)) } })
     }
 
     private fun avatarJson(a: Avatar) = JSONObject()

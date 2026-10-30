@@ -12,7 +12,10 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import com.duodeck.launcher.R
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,7 +61,7 @@ val LocalDuo = staticCompositionLocalOf { duoFor(false, Themes.builtin.first(), 
 val CardShape = RoundedCornerShape(18.dp)
 val PillShape = RoundedCornerShape(50)
 
-private val Rounded = FontFamily.SansSerif
+val Rounded = FontFamily(Font(R.font.fredoka_one, FontWeight.Normal), Font(R.font.fredoka_one, FontWeight.Bold), Font(R.font.fredoka_one, FontWeight.ExtraBold))
 
 @Composable
 fun DuoTheme(
@@ -85,7 +88,7 @@ fun DuoTheme(
                 bodyMedium = TextStyle(fontFamily = Rounded, fontWeight = FontWeight.Medium, fontSize = 14.sp),
                 labelMedium = TextStyle(fontFamily = Rounded, fontWeight = FontWeight.Bold, fontSize = 12.sp),
             ),
-            content = content,
+            content = { ProvideTextStyle(TextStyle(fontFamily = Rounded), content) },
         )
     }
 }

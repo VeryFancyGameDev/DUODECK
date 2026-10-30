@@ -66,13 +66,18 @@ fun DotBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.(
             )
             Box(Modifier.matchParentSize().background(duo.bgBottom.copy(alpha = duo.dim.coerceIn(0f, 0.95f))))
         } else {
-            Canvas(Modifier.matchParentSize()) { drawPattern(duo) }
+            var clock by remember { mutableLongStateOf(0L) }
+            LaunchedEffect(Unit) {
+                val start = withFrameNanos { it }
+                while (true) withFrameNanos { clock = it - start }
+            }
+            Canvas(Modifier.matchParentSize()) { drawPattern(duo, clock / 1_000_000_000f) }
         }
         content()
     }
 }
 
-private fun DrawScope.drawPattern(duo: Duo) {
+private fun DrawScope.drawPattern(duo: Duo, t: Float) {
     when (duo.pattern) {
         "none" -> Unit
         "lines" -> {
@@ -95,35 +100,49 @@ private fun DrawScope.drawPattern(duo: Duo) {
             val gapPx = 16.dp.toPx()
             val step = cube + gapPx
             val radius = 16.dp.toPx()
-            var y = -cube / 2f
+            val rowH = step * 0.86f
+            // whole lattice drifts diagonally and wraps; each cube also breathes on its own phase
+            val dx = (t * 14.dp.toPx()) % step
+            val dy = (t * 9.dp.toPx()) % (rowH * 2f)
+            var y = -cube - dy
             var row = 0
             while (y < size.height) {
-                var x = if (row % 2 == 0) -cube / 3f else step / 2f - cube / 3f
+                var x = (if (row % 2 == 0) -cube / 3f else step / 2f - cube / 3f) - step + dx
+                var col = 0
                 while (x < size.width) {
-                    drawRoundRect(duo.dots, Offset(x, y), Size(cube, cube), CornerRadius(radius))
-                    drawRoundRect(Color.Black.copy(alpha = 0.035f), Offset(x, y), Size(cube, cube), CornerRadius(radius),
+                    val ph = (row * 7 + col * 13) * 0.61f
+                    val k = 0.92f + 0.08f * kotlin.math.sin(t * 1.3f + ph)
+                    val sz = cube * k
+                    val off = (cube - sz) / 2f
+                    val a = 0.75f + 0.25f * kotlin.math.sin(t * 0.9f + ph * 1.7f)
+                    drawRoundRect(duo.dots.copy(alpha = (duo.dots.alpha * a).coerceIn(0f, 1f)),
+                        Offset(x + off, y + off), Size(sz, sz), CornerRadius(radius))
+                    drawRoundRect(Color.Black.copy(alpha = 0.035f), Offset(x + off, y + off), Size(sz, sz), CornerRadius(radius),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx()))
-                    x += step
+                    x += step; col++
                 }
-                y += step * 0.86f; row++
+                y += rowH; row++
             }
         }
         "bubbles" -> {
             val r = Random(7)
             repeat(24) {
-                drawCircle(
-                    duo.dots, r.nextFloat() * 30.dp.toPx() + 8.dp.toPx(),
-                    Offset(r.nextFloat() * size.width, r.nextFloat() * size.height),
-                )
+                val rad = r.nextFloat() * 30.dp.toPx() + 8.dp.toPx()
+                val bx = r.nextFloat() * size.width
+                val by = r.nextFloat() * size.height
+                val sp = 10f + r.nextFloat() * 22f
+                val yy = ((by - t * sp.dp.toPx()) % (size.height + rad * 2) + size.height + rad * 2) % (size.height + rad * 2) - rad
+                drawCircle(duo.dots, rad, Offset(bx + kotlin.math.sin(t + bx) * 8.dp.toPx(), yy))
             }
         }
         else -> {
             val step = 26.dp.toPx()
             val radius = 2.6.dp.toPx()
-            var y = step / 2
+            val drift = (t * 8.dp.toPx()) % step
+            var y = step / 2 - step + drift
             var row = 0
             while (y < size.height + step) {
-                var x = if (row % 2 == 0) step / 2 else step
+                var x = (if (row % 2 == 0) step / 2 else step) - step + drift
                 while (x < size.width + step) {
                     drawCircle(duo.dots, radius, Offset(x, y))
                     x += step

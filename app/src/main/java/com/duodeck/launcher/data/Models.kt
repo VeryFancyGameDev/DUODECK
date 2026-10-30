@@ -20,6 +20,8 @@ data class GameSystem(
     val colorB: Color,
     /** Candidate emulator package names, first installed one wins. */
     val emulators: List<String>,
+    /** Lower-case words matched against installed app labels (for apps whose package name we can't be sure of). */
+    val labelHints: List<String> = emptyList(),
 )
 
 data class RaProgress(
@@ -76,6 +78,8 @@ data class Avatar(
     val bg: Int = 0,
 )
 
+data class SteamGame(val appId: Int, val name: String)
+
 data class GameStat(val plays: Int = 0, val last: Long = 0L)
 
 enum class SortMode { NAME, RECENT, MOST_PLAYED }
@@ -95,4 +99,17 @@ data class UserState(
     val profiles: Map<String, LaunchProfile> = emptyMap(),
     val avatar: Avatar = Avatar(),
     val themes: List<ThemeDef> = emptyList(),
+    // --- step coins
+    val stepBase: Long = -1L,
+    val stepCarry: Int = 0,
+    val stepsToday: Int = 0,
+    val stepCoinsToday: Int = 0,
+    val stepDay: String = "",
+    val totalSteps: Long = 0L,
+    // --- badge arcade
+    val badges: Map<String, Int> = emptyMap(),
+    val pins: List<String> = emptyList(),
+    val clawPlays: Int = 0,
+    // --- steam library (synced from the Steam Web API)
+    val steam: List<SteamGame> = emptyList(),
 )
