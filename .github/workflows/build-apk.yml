@@ -40,8 +40,9 @@ jobs:
         if: success() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message }}
         run: |
           cp app/build/outputs/apk/release/app-release.apk DuoDeck.apk
           gh release create "build-${{ github.run_number }}" DuoDeck.apk \
             --title "DuoDeck 3.1 (build ${{ github.run_number }})" \
-            --notes "${{ github.event.head_commit.message }}" --latest
+            --notes "$NOTES" --latest
